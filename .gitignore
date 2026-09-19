@@ -1,0 +1,18 @@
+# secrets
+.env
+
+# python
+__pycache__/
+*.pyc
+.venv/
+
+# node (frontend dev)
+node_modules/
+
+# expo / builds
+.expo/
+dist/
+
+# editor / OS
+.vscode/
+.DS_Store
