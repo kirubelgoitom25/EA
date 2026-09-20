@@ -5,8 +5,8 @@ the web dashboard and sees the students.
 
 ## Folders
 backend/       Python + FastAPI + PostgreSQL (API)
-student-app/   React Native + Expo + TypeScript (frontend dev creates this)
-teacher-web/   React + TypeScript (frontend dev creates this)
+student-app/ React Native + Expo + JavaScript
+teacher-web/ React + JavaScript
 
 ## Rules
 Auth: JWT, sent as "Authorization: Bearer <token>"
