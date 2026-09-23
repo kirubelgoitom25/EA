@@ -1,33 +1,60 @@
+import uuid
 from typing import Optional
 
+import jwt
 from fastapi import Depends, HTTPException
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from jwt import PyJWKClient
+from sqlalchemy.orm import Session
 
-from app.stub_data import STUB_USERS
+from app.config import settings
+from app.database import get_db
+from app.models import Profile
 
 bearer_scheme = HTTPBearer(auto_error=False)
+jwks_client = PyJWKClient(settings.supabase_jwks_url)
 
-TOKEN_PREFIX = "stub-token-"
+INVALID_TOKEN = HTTPException(status_code=401, detail="Invalid or expired token")
 
 
 def get_current_user(
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(bearer_scheme),
+    db: Session = Depends(get_db),
 ) -> dict:
-    invalid = HTTPException(status_code=401, detail="Invalid or expired token")
+    if credentials is None:
+        raise INVALID_TOKEN
 
-    if credentials is None or not credentials.credentials.startswith(TOKEN_PREFIX):
-        raise invalid
+    token = credentials.credentials
 
     try:
-        user_id = int(credentials.credentials[len(TOKEN_PREFIX) :])
+        signing_key = jwks_client.get_signing_key_from_jwt(token)
+        payload = jwt.decode(
+            token,
+            signing_key.key,
+            algorithms=["ES256"],
+            audience="authenticated",
+            issuer=settings.supabase_issuer,
+        )
+    except jwt.PyJWTError:
+        raise INVALID_TOKEN
+
+    try:
+        profile_id = uuid.UUID(payload.get("sub", ""))
     except ValueError:
-        raise invalid
+        raise INVALID_TOKEN
 
-    for user in STUB_USERS:
-        if user["id"] == user_id:
-            return user
+    profile = db.get(Profile, profile_id)
+    if profile is None:
+        raise INVALID_TOKEN
 
-    raise invalid
+    return {
+        "id": str(profile.id),
+        "name": profile.name,
+        "email": payload.get("email"),
+        "role": profile.role,
+        "is_active": profile.is_active,
+        "created_at": profile.created_at,
+    }
 
 
 def require_teacher(user: dict = Depends(get_current_user)) -> dict:
