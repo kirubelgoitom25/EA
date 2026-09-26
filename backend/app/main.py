@@ -3,7 +3,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from app.routers import auth, students
+from app.routers import auth, courses, students
 
 app = FastAPI(title="EA API", version="0.1.0")
 
@@ -32,6 +32,7 @@ async def validation_error_handler(request: Request, exc: RequestValidationError
 
 app.include_router(auth.router)
 app.include_router(students.router)
+app.include_router(courses.router)
 
 
 @app.get("/health")
