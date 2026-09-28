@@ -1,5 +1,5 @@
 import uuid
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func
@@ -19,8 +19,12 @@ XP_BY_ATTEMPT = [Decimal("10"), Decimal("5"), Decimal("2.5"), Decimal("1")]
 
 
 def _xp_per_correct(attempt_number: int) -> Decimal:
-    index = min(attempt_number - 1, len(XP_BY_ATTEMPT) - 1)
-    return XP_BY_ATTEMPT[max(index, 0)]
+    # Attempts 1-4 pay 10 / 5 / 2.5 / 1 XP per correct answer.
+    # From attempt 5 on the quiz pays nothing, so a script can't
+    # grind the leaderboard by resubmitting forever.
+    if attempt_number > len(XP_BY_ATTEMPT):
+        return Decimal("0")
+    return XP_BY_ATTEMPT[max(attempt_number - 1, 0)]
 
 
 def _get_quiz_or_404(db: Session, lesson_id: str) -> Quiz:
@@ -78,6 +82,9 @@ def submit_quiz(
     correct_by_id = {q.id: q.correct_index for q in quiz.questions}
     submitted_ids = {answer.question_id for answer in body.answers}
 
+    if len(submitted_ids) != len(body.answers):
+        raise HTTPException(status_code=422, detail="Duplicate question ids")
+
     if not submitted_ids or not submitted_ids.issubset(correct_by_id.keys()):
         raise HTTPException(status_code=422, detail="Invalid or missing question ids")
 
@@ -90,7 +97,7 @@ def submit_quiz(
 
     attempt_number = _next_attempt_number(db, student_id, quiz.id)
     xp_per_correct = _xp_per_correct(attempt_number)
-    xp_earned = (Decimal(score) * xp_per_correct).quantize(Decimal("0.01"))
+    xp_earned = (Decimal(score) * xp_per_correct).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
 
     db.add(
         QuizAttempt(

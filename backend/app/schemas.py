@@ -44,6 +44,7 @@ class CourseListItemOut(BaseModel):
     total_lessons: int
     completed_lessons: int
     progress: int
+    modules: list[ModuleOut]
 
 
 class CourseDetailOut(BaseModel):
@@ -133,3 +134,5 @@ class RankingEntryOut(BaseModel):
     id: str
     name: str
     xp: Decimal
+    weekly_xp: Decimal
+    monthly_xp: Decimal
