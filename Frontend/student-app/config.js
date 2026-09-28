@@ -7,4 +7,4 @@ export const SUPABASE_ANON_KEY =
 // While testing: your laptop's Wi-Fi IPv4 address (run ipconfig) + :8001.
 // After hosting the backend: replace with the https URL of the hosted backend.
 // 127.0.0.1 would mean "the phone itself", so it can't be used here.
-export const API_BASE_URL = "http://192.168.213.172:8001";
+export const API_BASE_URL = "http://192.168.1.6:8001";
