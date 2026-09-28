@@ -54,7 +54,7 @@ def list_courses(
 
 @router.get("/{course_id}", response_model=CourseDetailOut)
 def get_course(
-    course_id: int,
+    course_id: str,
     current_user: dict = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
