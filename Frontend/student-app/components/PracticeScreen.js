@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import {
   View,
   Text,
@@ -6,10 +6,12 @@ import {
   TextInput,
   TouchableOpacity,
   ScrollView,
+  ActivityIndicator,
+  Alert,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 
-import { practices } from "../services/api";
+import { fetchPracticeByLessonId, submitPractice } from "../services/api";
 import { colors, radius } from "../theme";
 import BottomNavBar from "./BottomNavBar";
 import DuoButton from "./DuoButton";
@@ -53,13 +55,61 @@ export default function PracticeScreen({
   onRanking,
   onProfile,
 }) {
-  const practice = practices.find((item) => item.lessonId === lesson.id);
+  const [practice, setPractice] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(null);
 
   const [answers, setAnswers] = useState({});
   const [submitted, setSubmitted] = useState(false);
-  const [hasAwardedXp, setHasAwardedXp] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [serverResults, setServerResults] = useState(null);
 
   const navProps = { onHome, onCourses, onRanking, onProfile };
+
+  const loadPractice = useCallback(async () => {
+    setLoading(true);
+    setLoadError(null);
+    try {
+      setPractice(await fetchPracticeByLessonId(lesson.id));
+    } catch (error) {
+      setLoadError(error.message);
+    } finally {
+      setLoading(false);
+    }
+  }, [lesson.id]);
+
+  useEffect(() => {
+    loadPractice();
+  }, [loadPractice]);
+
+  if (loading) {
+    return (
+      <NavBarWrapper {...navProps}>
+        <View style={styles.emptyContainer}>
+          <ActivityIndicator size="large" color={colors.green} />
+        </View>
+      </NavBarWrapper>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <NavBarWrapper {...navProps}>
+        <View style={styles.emptyContainer}>
+          <Text style={styles.title}>Couldn't load the practice</Text>
+          <Text>{loadError}</Text>
+
+          <TouchableOpacity onPress={loadPractice}>
+            <Text style={styles.backButton}>Try again</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity onPress={onBack}>
+            <Text style={styles.backButton}>← Back to Lesson</Text>
+          </TouchableOpacity>
+        </View>
+      </NavBarWrapper>
+    );
+  }
 
   if (!practice) {
     return (
@@ -77,6 +127,8 @@ export default function PracticeScreen({
 
   const isChoose = (activity) => activity.type === "choose";
 
+  // Used only to colour each answer green/red after submitting.
+  // The score and XP come from the server.
   const isCorrect = (activity) => {
     const userAnswer = answers[activity.id];
 
@@ -108,45 +160,46 @@ export default function PracticeScreen({
     setAnswers((current) => ({ ...current, [id]: optionIndex }));
   };
 
-  const getResults = () => {
-    let score = 0;
-    let xpEarned = 0;
-    let xpPossible = 0;
+  const handleSubmit = async () => {
+    if (submitting || submitted) {
+      return;
+    }
 
-    practice.activities.forEach((activity) => {
-      const xp = getActivityXp(activity.type);
-      xpPossible += xp;
+    setSubmitting(true);
+    try {
+      const result = await submitPractice(
+        lesson.id,
+        practice.activities.map((activity) => ({
+          itemId: activity.id,
+          textAnswer: isChoose(activity) ? null : answers[activity.id] ?? "",
+          selectedIndex: isChoose(activity) ? answers[activity.id] ?? null : null,
+        }))
+      );
 
-      if (isCorrect(activity)) {
-        score += 1;
-        xpEarned += xp;
-      }
-    });
-
-    return { score, xpEarned, xpPossible };
-  };
-
-  const handleSubmit = () => {
-    setSubmitted(true);
-
-    if (!hasAwardedXp) {
-      const { xpEarned } = getResults();
+      setServerResults({
+        score: result.score,
+        xpEarned: result.xpEarned,
+        xpPossible: result.xpPossible,
+      });
+      setSubmitted(true);
 
       if (onComplete) {
-        onComplete(xpEarned, results.score);
+        onComplete();
       }
-
-      setHasAwardedXp(true);
+    } catch (error) {
+      Alert.alert("Couldn't submit your practice", error.message);
+    } finally {
+      setSubmitting(false);
     }
   };
 
   const handleTryAgain = () => {
     setAnswers({});
     setSubmitted(false);
+    setServerResults(null);
   };
 
-  const results = submitted ? getResults() : null;
-
+  const results = submitted ? serverResults : null;
   return (
     <NavBarWrapper {...navProps}>
       <ScrollView

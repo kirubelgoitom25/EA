@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from "react";
-import { View, ActivityIndicator, StyleSheet } from "react-native";
+import React, { useCallback, useEffect, useState } from "react";
+import { View, ActivityIndicator, StyleSheet, Alert } from "react-native";
 
 import LoginScreen from "./components/LoginScreen";
 import HomeScreen from "./components/HomeScreen";
@@ -11,36 +11,75 @@ import QuizScreen from "./components/QuizScreen";
 import RankingScreen from "./components/RankingScreen";
 import PracticeScreen from "./components/PracticeScreen";
 
+import { supabase } from "./lib/supabase";
 import {
   loginUser,
   logoutUser,
+  restoreSession,
   fetchStudent,
   fetchCourses,
-  addXp,
-  markLessonCompleted,
-  recordQuizAttempt,
-  recordPracticeAttempt,
+  fetchRanking,
 } from "./services/api";
 
 export default function App() {
   const [user, setUser] = useState(null);
   const [screen, setScreen] = useState("login");
+  const [restoring, setRestoring] = useState(true);
 
   const [student, setStudent] = useState(null);
   const [courses, setCourses] = useState([]);
+  const [ranking, setRanking] = useState([]);
   const [loadingData, setLoadingData] = useState(false);
 
-  const [completedLessons, setCompletedLessons] = useState([]);
   const [selectedCourse, setSelectedCourse] = useState(null);
   const [selectedLesson, setSelectedLesson] = useState(null);
 
-  // How many times each lesson's quiz has been completed —
-  // drives the diminishing XP rate on retries.
-  const [lessonAttempts, setLessonAttempts] = useState({});
+  const resetToLogin = useCallback(() => {
+    setUser(null);
+    setStudent(null);
+    setCourses([]);
+    setRanking([]);
+    setSelectedCourse(null);
+    setSelectedLesson(null);
+    setScreen("login");
+  }, []);
 
-  // Once logged in, load the student profile and course list.
-  // Today this resolves instantly from mock data; once the api.js
-  // functions call Supabase for real, nothing here needs to change.
+  // On launch: if a saved session exists, skip the login screen.
+  useEffect(() => {
+    let cancelled = false;
+
+    restoreSession()
+      .then((restoredUser) => {
+        if (!cancelled && restoredUser) {
+          setUser(restoredUser);
+          setScreen("home");
+        }
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) {
+          setRestoring(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Any sign-out (logout button, or the server rejecting an expired
+  // session) sends the app back to the login screen.
+  useEffect(() => {
+    const { data } = supabase.auth.onAuthStateChange((event) => {
+      if (event === "SIGNED_OUT") {
+        resetToLogin();
+      }
+    });
+
+    return () => data.subscription.unsubscribe();
+  }, [resetToLogin]);
+
+  // Once logged in, load everything the app shows from the server.
   useEffect(() => {
     if (!user) {
       return;
@@ -49,16 +88,22 @@ export default function App() {
     let cancelled = false;
     setLoadingData(true);
 
-    Promise.all([fetchStudent(), fetchCourses()])
-      .then(([studentData, coursesData]) => {
+    Promise.all([fetchStudent(), fetchCourses(), fetchRanking()])
+      .then(([studentData, coursesData, rankingData]) => {
         if (cancelled) {
           return;
         }
         setStudent(studentData);
         setCourses(coursesData);
+        setRanking(rankingData);
       })
       .catch((error) => {
-        console.error("Failed to load student data:", error);
+        if (cancelled) {
+          return;
+        }
+        Alert.alert("Couldn't load your data", error.message);
+        setUser(null);
+        setScreen("login");
       })
       .finally(() => {
         if (!cancelled) {
@@ -71,8 +116,28 @@ export default function App() {
     };
   }, [user]);
 
-  // Shared navigation props for the bottom nav bar, used on
-  // every main screen so it stays consistent everywhere.
+  // After the server records a quiz or practice, ask it what's true now.
+  // XP, streak, ranking and lesson checkmarks all come from the server.
+  const refreshProgress = useCallback(async () => {
+    try {
+      const [studentData, coursesData, rankingData] = await Promise.all([
+        fetchStudent(),
+        fetchCourses(),
+        fetchRanking(),
+      ]);
+      setStudent(studentData);
+      setCourses(coursesData);
+      setRanking(rankingData);
+      setSelectedCourse((current) =>
+        current
+          ? coursesData.find((course) => course.id === current.id) ?? current
+          : current
+      );
+    } catch (error) {
+      console.error("Failed to refresh progress:", error);
+    }
+  }, []);
+
   const navProps = {
     onHome: () => setScreen("home"),
     onCourses: () => setScreen("courses"),
@@ -80,26 +145,18 @@ export default function App() {
     onProfile: () => setScreen("profile"),
   };
 
-  const handleLogin = async (credentials) => {
+  const handleLogin = async ({ email, password }) => {
     try {
-      const loggedInUser = await loginUser(
-        credentials.email,
-        credentials.password
-      );
+      const loggedInUser = await loginUser(email.trim(), password);
       setUser(loggedInUser);
       setScreen("home");
     } catch (error) {
-      console.error("Login failed:", error);
+      Alert.alert("Login failed", error.message);
     }
   };
 
   const handleLogout = async () => {
     await logoutUser();
-    setUser(null);
-    setStudent(null);
-    setCourses([]);
-    setCompletedLessons([]);
-    setScreen("login");
   };
 
   const openCourse = (course) => {
@@ -112,130 +169,13 @@ export default function App() {
     setScreen("lesson");
   };
 
-  const openQuiz = () => {
-    setScreen("quiz");
-  };
-
-  const openPractice = () => {
-    setScreen("practice");
-  };
-
-  // Shared logic: award XP and mark a lesson's progress. Used by
-  // both the quiz and practice completion handlers below.
-  const markLessonProgress = (xpEarned, source) => {
-    if (!selectedLesson || !student) {
-      return;
-    }
-
-    setStudent((currentStudent) => ({
-      ...currentStudent,
-      xp: currentStudent.xp + xpEarned,
-    }));
-
-    // Fire-and-forget writes through the api layer. Today these
-    // are no-op mocks; once Supabase is wired in, this is where
-    // the real persistence happens — the screens above never need
-    // to know the difference.
-    addXp(student.id, xpEarned, source).catch((error) =>
-      console.error("Failed to record XP:", error)
+  if (restoring) {
+    return (
+      <View style={styles.loadingScreen}>
+        <ActivityIndicator size="large" color="#58cc02" />
+      </View>
     );
-
-    const alreadyCompleted = completedLessons.includes(selectedLesson.id);
-
-    if (!alreadyCompleted) {
-      setCompletedLessons((current) => [...current, selectedLesson.id]);
-      markLessonCompleted(selectedLesson.id).catch((error) =>
-        console.error("Failed to mark lesson completed:", error)
-      );
-    }
-
-    // Build the updated courses list once, up front, instead of
-    // mutating other state from inside setCourses' updater function.
-    let updatedSelectedCourse = null;
-
-    const nextCourses = courses.map((course) => {
-      const hasLesson = course.modules.some((module) =>
-        module.lessons.some((lesson) => lesson.id === selectedLesson.id)
-      );
-
-      if (!hasLesson) {
-        return course;
-      }
-
-      const updatedModules = course.modules.map((module) => ({
-        ...module,
-        lessons: module.lessons.map((lesson) =>
-          lesson.id === selectedLesson.id
-            ? { ...lesson, completed: true }
-            : lesson
-        ),
-      }));
-
-      const totalLessons = updatedModules.reduce(
-        (total, module) => total + module.lessons.length,
-        0
-      );
-
-      const completedLessonsCount = updatedModules.reduce(
-        (total, module) =>
-          total +
-          module.lessons.filter((lesson) => lesson.completed).length,
-        0
-      );
-
-      const updatedCourse = {
-        ...course,
-        modules: updatedModules,
-        totalLessons,
-        completedLessons: completedLessonsCount,
-        progress:
-          totalLessons > 0
-            ? Math.round((completedLessonsCount / totalLessons) * 100)
-            : 0,
-      };
-
-      updatedSelectedCourse = updatedCourse;
-      return updatedCourse;
-    });
-
-    setCourses(nextCourses);
-
-    if (updatedSelectedCourse) {
-      setSelectedCourse(updatedSelectedCourse);
-    }
-  };
-
-  // Quiz completions also track the attempt count, which drives
-  // the diminishing XP rate on retries (10 / 5 / 2.5 / 1).
-  const completeQuiz = (xpEarned, score) => {
-    if (!selectedLesson || !student) {
-      return;
-    }
-
-    setLessonAttempts((current) => ({
-      ...current,
-      [selectedLesson.id]: (current[selectedLesson.id] || 0) + 1,
-    }));
-
-    recordQuizAttempt(student.id, selectedLesson.id, score, xpEarned).catch(
-      (error) => console.error("Failed to record quiz attempt:", error)
-    );
-
-    markLessonProgress(xpEarned, "quiz");
-  };
-
-  // Practice completions don't affect the quiz's attempt count.
-  const completePractice = (xpEarned, score) => {
-    if (!selectedLesson || !student) {
-      return;
-    }
-
-    recordPracticeAttempt(student.id, selectedLesson.id, score, xpEarned).catch(
-      (error) => console.error("Failed to record practice attempt:", error)
-    );
-
-    markLessonProgress(xpEarned, "practice");
-  };
+  }
 
   if (!user) {
     return <LoginScreen onLogin={handleLogin} />;
@@ -254,6 +194,7 @@ export default function App() {
       <HomeScreen
         user={student}
         courses={courses}
+        ranking={ranking}
         {...navProps}
         onSelectCourse={openCourse}
         onLogout={handleLogout}
@@ -265,6 +206,7 @@ export default function App() {
     return (
       <ProfileScreen
         user={student}
+        ranking={ranking}
         onBack={() => setScreen("home")}
         onLogout={handleLogout}
         {...navProps}
@@ -299,8 +241,8 @@ export default function App() {
       <LessonScreen
         lesson={selectedLesson}
         onBack={() => setScreen("course")}
-        onQuiz={openQuiz}
-        onPractice={openPractice}
+        onQuiz={() => setScreen("quiz")}
+        onPractice={() => setScreen("practice")}
         {...navProps}
       />
     );
@@ -311,7 +253,7 @@ export default function App() {
       <PracticeScreen
         lesson={selectedLesson}
         onBack={() => setScreen("lesson")}
-        onComplete={completePractice}
+        onComplete={refreshProgress}
         {...navProps}
       />
     );
@@ -321,9 +263,8 @@ export default function App() {
     return (
       <QuizScreen
         lesson={selectedLesson}
-        attemptNumber={(lessonAttempts[selectedLesson.id] || 0) + 1}
         onBack={() => setScreen("lesson")}
-        onComplete={completeQuiz}
+        onComplete={refreshProgress}
         {...navProps}
       />
     );
@@ -333,6 +274,7 @@ export default function App() {
     return (
       <RankingScreen
         student={student}
+        ranking={ranking}
         onBack={() => setScreen("home")}
         {...navProps}
       />

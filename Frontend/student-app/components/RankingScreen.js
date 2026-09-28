@@ -8,7 +8,7 @@ import {
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 
-import { ranking } from "../data/mockData";
+
 import { colors, radius } from "../theme";
 import BottomNavBar from "./BottomNavBar";
 
@@ -42,6 +42,7 @@ const MEDAL_COLORS = {
 
 export default function RankingScreen({
   student,
+  ranking,
   onBack,
   onHome,
   onCourses,
@@ -70,7 +71,7 @@ export default function RankingScreen({
     }));
 
     return combined.sort((a, b) => b.periodXp - a.periodXp);
-  }, [student, period]);
+  }, [student, period, ranking]);
 
   const currentPosition =
     leaderboard.findIndex((item) => item.isCurrentUser) + 1;

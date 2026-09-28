@@ -4,8 +4,22 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.routers import auth, courses, practice, quiz, stats, students
+from fastapi import Depends, FastAPI, Request
+from sqlalchemy import text
+from sqlalchemy.orm import Session
 
-app = FastAPI(title="EA API", version="0.1.0")
+from app.database import get_db
+
+import os
+
+IS_PROD = os.getenv("ENVIRONMENT") == "production"
+app = FastAPI(
+    title="EA API",
+    version="0.1.0",
+    docs_url=None if IS_PROD else "/docs",
+    redoc_url=None,
+    openapi_url=None if IS_PROD else "/openapi.json",
+)
 
 app.add_middleware(
     CORSMiddleware,
@@ -40,4 +54,10 @@ app.include_router(stats.router)
 
 @app.get("/health")
 def health():
+    return {"status": "ok"}
+
+
+@app.get("/health/db")
+def health_db(db: Session = Depends(get_db)):
+    db.execute(text("select 1"))
     return {"status": "ok"}
