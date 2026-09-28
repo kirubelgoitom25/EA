@@ -83,26 +83,30 @@ def submit_practice(
     items_by_id = {item.id: item for item in practice.items}
     submitted_ids = {answer.item_id for answer in body.answers}
 
+    if len(submitted_ids) != len(body.answers):
+        raise HTTPException(status_code=422, detail="Duplicate item ids")
+
     if not submitted_ids or not submitted_ids.issubset(items_by_id.keys()):
         raise HTTPException(status_code=422, detail="Invalid or missing item ids")
 
-    score = 0
-    xp_possible = Decimal("0")
+    xp_possible = sum((XP_BY_TYPE[item.type] for item in practice.items), Decimal("0"))
     xp_if_correct = Decimal("0")
+    score = 0
 
     for answer in body.answers:
         item = items_by_id[answer.item_id]
-        item_xp = XP_BY_TYPE[item.type]
-        xp_possible += item_xp
 
         if item.type == "choose":
-            is_correct = answer.selected_index is not None and answer.selected_index == item.correct_index
+            is_correct = (
+                answer.selected_index is not None
+                and answer.selected_index == item.correct_index
+            )
         else:
             is_correct = _normalize(answer.text_answer) == _normalize(item.answer)
 
         if is_correct:
             score += 1
-            xp_if_correct += item_xp
+            xp_if_correct += XP_BY_TYPE[item.type]
 
     is_first_completion = not _has_completed_before(db, student_id, practice.id)
     xp_earned = xp_if_correct if is_first_completion else Decimal("0")
@@ -112,7 +116,7 @@ def submit_practice(
             student_id=student_id,
             practice_id=practice.id,
             score=score,
-            total_items=len(body.answers),
+            total_items=len(practice.items),
             xp_earned=xp_earned,
             is_first_completion=is_first_completion,
         )
@@ -135,7 +139,7 @@ def submit_practice(
 
     return {
         "score": score,
-        "total_items": len(body.answers),
+        "total_items": len(practice.items),
         "xp_earned": xp_earned,
         "xp_possible": xp_possible,
         "is_first_completion": is_first_completion,
