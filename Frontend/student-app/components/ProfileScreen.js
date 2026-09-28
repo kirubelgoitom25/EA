@@ -9,7 +9,6 @@ import {
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
 
-import { ranking } from "../data/mockData";
 import { colors, radius } from "../theme";
 import BottomNavBar from "./BottomNavBar";
 import XpProgressRing from "./XpProgressRing";
@@ -30,6 +29,7 @@ const getInitials = (name) => {
 
 export default function ProfileScreen({
   user,
+  ranking,
   onBack,
   onLogout,
   onHome,
@@ -44,7 +44,7 @@ export default function ProfileScreen({
     );
 
     return combined.findIndex((item) => item.id === user.id) + 1;
-  }, [user]);
+  }, [user,ranking]);
 
   return (
     <View style={styles.screen}>

@@ -1,125 +1,257 @@
-// ============================================================
-// Data access layer — the ONLY file that should change when we
-// swap mock data for real Supabase calls.
-//
-// Every function here is already async (returns a Promise), even
-// though today it just wraps the local mock data instantly. That
-// means every screen that calls these functions already works the
-// same way it will once Supabase is wired in — no screen code
-// needs to change when that happens, only the function bodies in
-// this file do.
-//
-// HOW TO MIGRATE LATER:
-// Each function below has a comment showing roughly what the real
-// Supabase call will look like. The backend developer's schema
-// should match the shapes documented in BACKEND_SPEC.md so these
-// functions can be swapped in directly.
-// ============================================================
+import { supabase } from "../lib/supabase";
+import { API_BASE_URL } from "../config";
 
-import {
-  student as mockStudent,
-  courses as mockCourses,
-  ranking as mockRanking,
-  quizzes as mockQuizzes,
-  practices as mockPractices,
-} from "../data/mockData";
+// ---- Plumbing ------------------------------------------------------
 
-// ---- Auth -----------------------------------------------------
+class ApiError extends Error {
+  constructor(message, status) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+  }
+}
+
+// Every backend call goes through here. It attaches the current login
+// token, and turns failures into readable messages.
+async function request(path, options = {}) {
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+
+  const headers = {
+    "Content-Type": "application/json",
+    ...(session ? { Authorization: `Bearer ${session.access_token}` } : {}),
+    ...options.headers,
+  };
+
+  let response;
+  try {
+    response = await fetch(`${API_BASE_URL}${path}`, { ...options, headers });
+  } catch (networkError) {
+    throw new ApiError("Can't reach the server. Check your connection and try again.", 0);
+  }
+
+  if (response.status === 401) {
+    await supabase.auth.signOut();
+    throw new ApiError("Your session expired. Please log in again.", 401);
+  }
+
+  const body = await response.json().catch(() => null);
+
+  if (!response.ok) {
+    throw new ApiError(body?.detail || "Something went wrong.", response.status);
+  }
+
+  return body;
+}
+
+const lessonPath = (lessonId) => `/lessons/${encodeURIComponent(lessonId)}`;
+
+// The backend speaks snake_case and returns money-like numbers as strings.
+// The screens were built for camelCase and real numbers, so translate once, here.
+function mapCourse(course) {
+  return {
+    id: course.id,
+    title: course.title,
+    description: course.description,
+    progress: course.progress,
+    totalLessons: course.total_lessons,
+    completedLessons: course.completed_lessons,
+    modules: course.modules.map((module) => ({
+      id: module.id,
+      title: module.title,
+      lessons: module.lessons.map((lesson) => ({
+        id: lesson.id,
+        title: lesson.title,
+        duration: lesson.duration,
+        videoUrl: lesson.video_url,
+        completed: lesson.completed,
+      })),
+    })),
+  };
+}
+
+// ---- Auth ----------------------------------------------------------
+
+async function loadStudentUser() {
+  const me = await request("/auth/me");
+
+  if (me.role !== "student") {
+    await supabase.auth.signOut();
+    throw new Error("This app is for students. Teachers should use the teacher dashboard.");
+  }
+
+  return { id: me.id, name: me.name, email: me.email, role: me.role };
+}
 
 export async function loginUser(email, password) {
-  // FUTURE: const { data, error } = await supabase.auth.signInWithPassword({ email, password });
   if (!email || !password) {
     throw new Error("Email and password are required.");
   }
 
-  return {
-    id: mockStudent.id,
-    name: mockStudent.name,
-    email,
-    role: mockStudent.role,
-  };
+  const { error } = await supabase.auth.signInWithPassword({ email, password });
+
+  if (error) {
+    if (error.name === "AuthRetryableFetchError") {
+      throw new Error("Can't reach the server. Check your connection and try again.");
+    }
+    throw new Error("Incorrect email or password.");
+  }
+
+  return loadStudentUser();
 }
 
 export async function logoutUser() {
-  // FUTURE: await supabase.auth.signOut();
+  await supabase.auth.signOut();
   return true;
 }
 
-// ---- Student / profile -----------------------------------------
+// On app start: if a saved session exists, skip the login screen.
+export async function restoreSession() {
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+
+  if (!session) {
+    return null;
+  }
+
+  try {
+    return await loadStudentUser();
+  } catch (error) {
+    return null;
+  }
+}
+
+// ---- Student, courses, ranking ---------------------------------------
 
 export async function fetchStudent() {
-  // FUTURE: const { data } = await supabase.from("profiles").select("*").eq("id", userId).single();
-  return { ...mockStudent };
-}
+  const [me, stats] = await Promise.all([request("/auth/me"), request("/me/stats")]);
 
-// Called after a quiz or practice completes. Should persist the
-// new XP total AND log the individual event (see BACKEND_SPEC.md —
-// we need an xp_events table, not just a running total, so the
-// diminishing-return retry logic and weekly/monthly XP can be
-// computed correctly).
-export async function addXp(studentId, amount, source) {
-  // FUTURE: await supabase.from("xp_events").insert({ student_id: studentId, amount, source });
-  return { success: true, amount, source };
+  return {
+    id: me.id,
+    name: me.name,
+    email: me.email,
+    role: me.role,
+    xp: Number(stats.xp),
+    streak: stats.current_streak,
+    weeklyXp: Number(stats.weekly_xp),
+    monthlyXp: Number(stats.monthly_xp),
+  };
 }
-
-// ---- Courses ----------------------------------------------------
 
 export async function fetchCourses() {
-  // FUTURE: const { data } = await supabase.from("courses").select("*, modules(*, lessons(*))");
-  return mockCourses.map((course) => ({ ...course }));
+  const courses = await request("/courses");
+  return courses.map(mapCourse);
 }
 
-export async function markLessonCompleted(lessonId) {
-  // FUTURE: await supabase.from("lesson_progress").upsert({ student_id, lesson_id: lessonId, completed: true });
-  return { success: true, lessonId };
+export async function fetchRanking() {
+  const rows = await request("/ranking");
+  return rows.map((row) => ({
+    id: row.id,
+    name: row.name,
+    xp: Number(row.xp),
+    weeklyXp: Number(row.weekly_xp),
+    monthlyXp: Number(row.monthly_xp),
+  }));
 }
 
-// ---- Quizzes ------------------------------------------------------
+// ---- Quiz ----------------------------------------------------------------
 
+// Returns null when the lesson has no quiz yet (the screen shows "coming soon").
 export async function fetchQuizByLessonId(lessonId) {
-  // FUTURE: const { data } = await supabase.from("quizzes").select("*, questions(*)").eq("lesson_id", lessonId).single();
-  return mockQuizzes.find((quiz) => quiz.lessonId === lessonId) || null;
+  try {
+    const quiz = await request(`${lessonPath(lessonId)}/quiz`);
+    return {
+      lessonId: quiz.lesson_id,
+      attemptNumber: quiz.attempt_number,
+      xpPerCorrect: Number(quiz.xp_per_correct),
+      questions: quiz.questions.map((question) => ({
+        id: question.id,
+        question: question.question,
+        options: question.options,
+        correctAnswer: question.correct_index,
+      })),
+    };
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 404) {
+      return null;
+    }
+    throw error;
+  }
 }
 
-// Returns how many times this student has attempted this lesson's
-// quiz — drives the diminishing XP rate (10 / 5 / 2.5 / 1).
-export async function fetchQuizAttemptCount(studentId, lessonId) {
-  // FUTURE: const { count } = await supabase.from("quiz_attempts").select("*", { count: "exact" }).eq("student_id", studentId).eq("lesson_id", lessonId);
-  return 0; // mock: always "first attempt" since we track attempts client-side today
+// answers: [{ questionId, selectedIndex }]. We send WHAT the student picked,
+// never a score. The server grades it, works out the attempt number and the
+// XP itself, records everything, and tells us the result.
+export async function submitQuiz(lessonId, answers) {
+  const result = await request(`${lessonPath(lessonId)}/quiz/submit`, {
+    method: "POST",
+    body: JSON.stringify({
+      answers: answers.map((answer) => ({
+        question_id: answer.questionId,
+        selected_index: answer.selectedIndex,
+      })),
+    }),
+  });
+
+  return {
+    attemptNumber: result.attempt_number,
+    score: result.score,
+    totalQuestions: result.total_questions,
+    xpEarned: Number(result.xp_earned),
+    xpPerCorrect: Number(result.xp_per_correct),
+    nextXpPerCorrect: Number(result.next_xp_per_correct),
+    allCorrect: result.all_correct,
+  };
 }
 
-export async function recordQuizAttempt(studentId, lessonId, score, xpEarned) {
-  // FUTURE: await supabase.from("quiz_attempts").insert({ student_id: studentId, lesson_id: lessonId, score, xp_earned: xpEarned });
-  return { success: true };
-}
-
-// ---- Practice -----------------------------------------------------
+// ---- Practice -------------------------------------------------------------
 
 export async function fetchPracticeByLessonId(lessonId) {
-  // FUTURE: const { data } = await supabase.from("practices").select("*, activities(*)").eq("lesson_id", lessonId).single();
-  return mockPractices.find((practice) => practice.lessonId === lessonId) || null;
+  try {
+    const practice = await request(`${lessonPath(lessonId)}/practice`);
+    return {
+      lessonId: practice.lesson_id,
+      title: practice.title,
+      alreadyCompleted: practice.already_completed,
+      activities: practice.items.map((item) => ({
+        id: item.id,
+        type: item.type,
+        question: item.question,
+        sentence: item.sentence,
+        options: item.options,
+        // The screen expects: a number (the right option's index) for
+        // "choose", and the correct text for "fill".
+        answer: item.type === "choose" ? item.correct_index : item.answer,
+      })),
+    };
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 404) {
+      return null;
+    }
+    throw error;
+  }
 }
 
-export async function recordPracticeAttempt(studentId, lessonId, score, xpEarned) {
-  // FUTURE: await supabase.from("practice_attempts").insert({ student_id: studentId, lesson_id: lessonId, score, xp_earned: xpEarned });
-  return { success: true };
+// answers: [{ itemId, textAnswer, selectedIndex }]
+export async function submitPractice(lessonId, answers) {
+  const result = await request(`${lessonPath(lessonId)}/practice/submit`, {
+    method: "POST",
+    body: JSON.stringify({
+      answers: answers.map((answer) => ({
+        item_id: answer.itemId,
+        text_answer: answer.textAnswer,
+        selected_index: answer.selectedIndex,
+      })),
+    }),
+  });
+
+  return {
+    score: result.score,
+    totalItems: result.total_items,
+    xpEarned: Number(result.xp_earned),
+    xpPossible: Number(result.xp_possible),
+    isFirstCompletion: result.is_first_completion,
+  };
 }
-
-// ---- Ranking / leaderboard -----------------------------------------
-
-// period is "weekly" | "monthly" | "overall"
-export async function fetchRanking(period = "overall") {
-  // FUTURE: query a view/RPC that sums xp_events within the right date range, per student.
-  return mockRanking.map((item) => ({ ...item }));
-}
-
-// ---- Temporary synchronous re-exports ---------------------------
-// A few screens (Quiz, Practice, Ranking, Home) still read these
-// arrays directly at import time rather than through the async
-// fetch* functions above. Re-exporting them from here — instead of
-// importing data/mockData.js directly — means every screen already
-// points at this one file, so finishing the migration later is a
-// per-screen conversion to fetchQuizByLessonId/fetchPracticeByLessonId/
-// fetchRanking inside a useEffect, not a hunt through the codebase
-// for stray mockData imports.
-export { ranking, quizzes, practices } from "../data/mockData";

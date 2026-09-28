@@ -11,7 +11,7 @@ import {
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
 
-import { ranking } from "../data/mockData";
+
 import { colors, radius } from "../theme";
 import BottomNavBar from "./BottomNavBar";
 import XpProgressRing from "./XpProgressRing";
@@ -139,6 +139,7 @@ function StreakFlame({ size = 16 }) {
 }
 
 export default function HomeScreen({
+  ranking,
   user,
   courses,
   onProfile,

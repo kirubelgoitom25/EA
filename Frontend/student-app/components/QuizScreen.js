@@ -1,27 +1,19 @@
-import React, { useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import {
   View,
   Text,
   StyleSheet,
   TouchableOpacity,
   ScrollView,
+  ActivityIndicator,
+  Alert,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 
-import { quizzes } from "../services/api";
+import { fetchQuizByLessonId, submitQuiz } from "../services/api";
 import { colors, radius } from "../theme";
 import BottomNavBar from "./BottomNavBar";
 import DuoButton from "./DuoButton";
-
-// XP awarded per correct answer, by attempt number.
-// Attempt 1 = 10, attempt 2 = 5, attempt 3 = 2.5,
-// attempt 4 and beyond = 1.
-const XP_BY_ATTEMPT = [10, 5, 2.5, 1];
-
-const getXpPerCorrectAnswer = (attemptNumber) => {
-  const index = Math.min(attemptNumber - 1, XP_BY_ATTEMPT.length - 1);
-  return XP_BY_ATTEMPT[Math.max(index, 0)];
-};
 
 const formatXpRate = (rate) =>
   Number.isInteger(rate) ? `${rate}` : rate.toFixed(1);
@@ -46,7 +38,6 @@ function NavBarWrapper({ children, onHome, onCourses, onRanking, onProfile }) {
 
 export default function QuizScreen({
   lesson,
-  attemptNumber = 1,
   onBack,
   onComplete,
   onHome,
@@ -54,15 +45,70 @@ export default function QuizScreen({
   onRanking,
   onProfile,
 }) {
-  const quiz = quizzes.find((item) => item.lessonId === lesson.id);
+  const [quiz, setQuiz] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(null);
 
   const [currentQuestion, setCurrentQuestion] = useState(0);
   const [selectedAnswer, setSelectedAnswer] = useState(null);
+  const [chosen, setChosen] = useState({});
   const [score, setScore] = useState(0);
   const [finished, setFinished] = useState(false);
   const [xpEarned, setXpEarned] = useState(0);
+  const [nextXpPerCorrect, setNextXpPerCorrect] = useState(0);
+  const [submitting, setSubmitting] = useState(false);
 
   const navProps = { onHome, onCourses, onRanking, onProfile };
+
+  // Fetch the quiz from the server. The server also tells us which attempt
+  // this is and what a correct answer is worth, so nothing is tracked here.
+  const loadQuiz = useCallback(async () => {
+    setLoading(true);
+    setLoadError(null);
+    try {
+      setQuiz(await fetchQuizByLessonId(lesson.id));
+    } catch (error) {
+      setLoadError(error.message);
+    } finally {
+      setLoading(false);
+    }
+  }, [lesson.id]);
+
+  useEffect(() => {
+    loadQuiz();
+  }, [loadQuiz]);
+
+  if (loading) {
+    return (
+      <NavBarWrapper {...navProps}>
+        <View style={[styles.container, { justifyContent: "center" }]}>
+          <ActivityIndicator size="large" color={colors.green} />
+        </View>
+      </NavBarWrapper>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <NavBarWrapper {...navProps}>
+        <View style={styles.container}>
+          <Text style={styles.title}>Couldn't load the quiz</Text>
+          <Text style={styles.resultSubtext}>{loadError}</Text>
+
+          <DuoButton
+            label="Try Again"
+            variant="primary"
+            onPress={loadQuiz}
+            style={styles.mainButton}
+          />
+
+          <TouchableOpacity onPress={onBack}>
+            <Text style={styles.backButton}>← Back to Lesson</Text>
+          </TouchableOpacity>
+        </View>
+      </NavBarWrapper>
+    );
+  }
 
   if (!quiz) {
     return (
@@ -78,7 +124,8 @@ export default function QuizScreen({
     );
   }
 
-  const xpPerCorrect = getXpPerCorrectAnswer(attemptNumber);
+  const attemptNumber = quiz.attemptNumber;
+  const xpPerCorrect = quiz.xpPerCorrect;
   const question = quiz.questions[currentQuestion];
 
   const handleAnswer = (index) => {
@@ -89,39 +136,61 @@ export default function QuizScreen({
     setSelectedAnswer(index);
   };
 
-  const handleNext = () => {
-    if (selectedAnswer === null) {
+  const handleNext = async () => {
+    if (selectedAnswer === null || submitting) {
       return;
     }
 
+    const updatedChosen = { ...chosen, [question.id]: selectedAnswer };
     const isLastQuestion = currentQuestion === quiz.questions.length - 1;
-    const newScore =
-      selectedAnswer === question.correctAnswer ? score + 1 : score;
 
-    setScore(newScore);
-
-    if (isLastQuestion) {
-      const totalXp = Math.round(newScore * xpPerCorrect);
-      setXpEarned(totalXp);
-      setFinished(true);
-      onComplete(totalXp, newScore);
+    if (!isLastQuestion) {
+      setChosen(updatedChosen);
+      setCurrentQuestion(currentQuestion + 1);
+      setSelectedAnswer(null);
       return;
     }
 
-    setCurrentQuestion(currentQuestion + 1);
-    setSelectedAnswer(null);
+    // Last question: send the answers, and use the SERVER's grade.
+    setSubmitting(true);
+    try {
+      const result = await submitQuiz(
+        lesson.id,
+        quiz.questions.map((item) => ({
+          questionId: item.id,
+          selectedIndex: updatedChosen[item.id],
+        }))
+      );
+
+      setChosen(updatedChosen);
+      setScore(result.score);
+      setXpEarned(result.xpEarned);
+      setNextXpPerCorrect(result.nextXpPerCorrect);
+      setFinished(true);
+
+      if (onComplete) {
+        onComplete();
+      }
+    } catch (error) {
+      Alert.alert("Couldn't submit your quiz", error.message);
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   const handleTryAgain = () => {
     setCurrentQuestion(0);
     setSelectedAnswer(null);
+    setChosen({});
     setScore(0);
+    setXpEarned(0);
     setFinished(false);
+    loadQuiz();
   };
 
   if (finished) {
     const totalQuestions = quiz.questions.length;
-    const nextRate = getXpPerCorrectAnswer(attemptNumber + 1);
+    const nextRate = nextXpPerCorrect;
     const isPerfect = score === totalQuestions;
 
     return (
