@@ -1,5 +1,10 @@
 # secrets
 .env
+.env.*
+!.env.example
+
+# local archives
+*.zip
 
 # python
 __pycache__/

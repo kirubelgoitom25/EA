@@ -16,7 +16,6 @@ jwks_client = PyJWKClient(settings.supabase_jwks_url)
 
 INVALID_TOKEN = HTTPException(status_code=401, detail="Invalid or expired token")
 
-
 def get_current_user(
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(bearer_scheme),
     db: Session = Depends(get_db),
