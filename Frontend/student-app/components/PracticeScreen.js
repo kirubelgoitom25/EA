@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   View,
   Text,
@@ -12,7 +12,7 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 
 import { fetchPracticeByLessonId, submitPractice } from "../services/api";
-import { colors, radius } from "../theme";
+import { radius, useTheme } from "../theme";
 import BottomNavBar from "./BottomNavBar";
 import DuoButton from "./DuoButton";
 
@@ -28,7 +28,23 @@ const getActivityXp = (type) => XP_BY_TYPE[type] ?? XP_BY_TYPE.fill;
 
 const normalize = (value) => (value ?? "").toString().trim().toLowerCase();
 
+const isChoose = (activity) => activity.type === "choose";
+
+// Whether the client received an answer key for this activity.
+const hasAnswerKey = (activity) =>
+  activity.answer !== undefined && activity.answer !== null;
+
+// Human-readable correct answer (option text for numeric "choose" answers).
+const getAnswerLabel = (activity) => {
+  if (isChoose(activity) && typeof activity.answer === "number") {
+    return (activity.options || [])[activity.answer] ?? activity.answer;
+  }
+  return activity.answer;
+};
+
 function NavBarWrapper({ children, onHome, onCourses, onRanking, onProfile }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   return (
     <View style={styles.screen}>
       {children}
@@ -55,12 +71,16 @@ export default function PracticeScreen({
   onRanking,
   onProfile,
 }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const [practice, setPractice] = useState(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
 
+  const [currentIndex, setCurrentIndex] = useState(0);
   const [answers, setAnswers] = useState({});
-  const [submitted, setSubmitted] = useState(false);
+  // True once the current activity has been checked (feedback is showing).
+  const [checked, setChecked] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [serverResults, setServerResults] = useState(null);
 
@@ -85,7 +105,7 @@ export default function PracticeScreen({
   if (loading) {
     return (
       <NavBarWrapper {...navProps}>
-        <View style={styles.emptyContainer}>
+        <View style={[styles.emptyContainer, { justifyContent: "center" }]}>
           <ActivityIndicator size="large" color={colors.green} />
         </View>
       </NavBarWrapper>
@@ -97,11 +117,14 @@ export default function PracticeScreen({
       <NavBarWrapper {...navProps}>
         <View style={styles.emptyContainer}>
           <Text style={styles.title}>Couldn't load the practice</Text>
-          <Text>{loadError}</Text>
+          <Text style={styles.subtitle}>{loadError}</Text>
 
-          <TouchableOpacity onPress={loadPractice}>
-            <Text style={styles.backButton}>Try again</Text>
-          </TouchableOpacity>
+          <DuoButton
+            label="Try Again"
+            variant="primary"
+            onPress={loadPractice}
+            style={styles.mainButton}
+          />
 
           <TouchableOpacity onPress={onBack}>
             <Text style={styles.backButton}>← Back to Lesson</Text>
@@ -111,7 +134,7 @@ export default function PracticeScreen({
     );
   }
 
-  if (!practice) {
+  if (!practice || !practice.activities?.length) {
     return (
       <NavBarWrapper {...navProps}>
         <View style={styles.emptyContainer}>
@@ -125,14 +148,22 @@ export default function PracticeScreen({
     );
   }
 
-  const isChoose = (activity) => activity.type === "choose";
+  const activities = practice.activities;
+  const total = activities.length;
+  const activity = activities[currentIndex];
+  const isLast = currentIndex === total - 1;
 
-  // Used only to colour each answer green/red after submitting.
+  const userAnswer = answers[activity.id];
+  const hasAnswer = isChoose(activity)
+    ? userAnswer !== undefined && userAnswer !== null
+    : normalize(userAnswer) !== "";
+
+  const keyKnown = hasAnswerKey(activity);
+
+  // Used only to colour the current answer green/red after checking.
   // The score and XP come from the server.
-  const isCorrect = (activity) => {
-    const userAnswer = answers[activity.id];
-
-    if (userAnswer === undefined || userAnswer === null) {
+  const isCorrect = () => {
+    if (!hasAnswer || !keyKnown) {
       return false;
     }
 
@@ -148,31 +179,32 @@ export default function PracticeScreen({
     return normalize(userAnswer) === normalize(activity.answer);
   };
 
-  const handleTextAnswer = (id, value) => {
-    setAnswers((current) => ({ ...current, [id]: value }));
-  };
+  const correct = checked && isCorrect();
+  const wrong = checked && keyKnown && !correct;
 
-  const handleChooseAnswer = (id, optionIndex) => {
-    if (submitted) {
+  const handleTextAnswer = (value) => {
+    if (checked) {
       return;
     }
-
-    setAnswers((current) => ({ ...current, [id]: optionIndex }));
+    setAnswers((current) => ({ ...current, [activity.id]: value }));
   };
 
-  const handleSubmit = async () => {
-    if (submitting || submitted) {
+  const handleChooseAnswer = (optionIndex) => {
+    if (checked) {
       return;
     }
+    setAnswers((current) => ({ ...current, [activity.id]: optionIndex }));
+  };
 
+  const submitAll = async () => {
     setSubmitting(true);
     try {
       const result = await submitPractice(
         lesson.id,
-        practice.activities.map((activity) => ({
-          itemId: activity.id,
-          textAnswer: isChoose(activity) ? null : answers[activity.id] ?? "",
-          selectedIndex: isChoose(activity) ? answers[activity.id] ?? null : null,
+        activities.map((item) => ({
+          itemId: item.id,
+          textAnswer: isChoose(item) ? null : answers[item.id] ?? "",
+          selectedIndex: isChoose(item) ? answers[item.id] ?? null : null,
         }))
       );
 
@@ -181,7 +213,6 @@ export default function PracticeScreen({
         xpEarned: result.xpEarned,
         xpPossible: result.xpPossible,
       });
-      setSubmitted(true);
 
       if (onComplete) {
         onComplete();
@@ -193,209 +224,283 @@ export default function PracticeScreen({
     }
   };
 
+  const goNextOrFinish = () => {
+    if (isLast) {
+      submitAll();
+      return;
+    }
+    setCurrentIndex(currentIndex + 1);
+    setChecked(false);
+  };
+
+  // One button drives the flow: Check -> Next / Finish.
+  // If the API hides the answer key there is nothing to check, so we skip
+  // straight to Next / Finish.
+  const handlePrimaryPress = () => {
+    if (!hasAnswer || submitting) {
+      return;
+    }
+
+    if (!checked && keyKnown) {
+      setChecked(true);
+      return;
+    }
+
+    goNextOrFinish();
+  };
+
   const handleTryAgain = () => {
     setAnswers({});
-    setSubmitted(false);
+    setChecked(false);
+    setCurrentIndex(0);
     setServerResults(null);
   };
 
-  const results = submitted ? serverResults : null;
+  // ---------- Results ----------
+  if (serverResults) {
+    const isPerfect = serverResults.score === total;
+
+    return (
+      <NavBarWrapper {...navProps}>
+        <ScrollView
+          style={styles.container}
+          contentContainerStyle={styles.scrollContent}
+        >
+          <View
+            style={[
+              styles.resultBadge,
+              { backgroundColor: isPerfect ? colors.gold : colors.green },
+            ]}
+          >
+            <Ionicons
+              name={isPerfect ? "trophy" : "checkmark-circle"}
+              size={44}
+              color="#fff"
+            />
+          </View>
+
+          <Text style={styles.resultTitle}>Practice Complete!</Text>
+
+          <Text style={styles.score}>
+            {serverResults.score}/{total}
+          </Text>
+
+          <View style={styles.xpPill}>
+            <Ionicons name="flash" size={16} color={colors.blueDark} />
+            <Text style={styles.xpEarnedText}>
+              {serverResults.xpEarned} / {serverResults.xpPossible} XP earned
+            </Text>
+          </View>
+
+          <Text style={styles.resultText}>
+            {isPerfect
+              ? "Perfect run — nice work!"
+              : "Keep practicing to improve!"}
+          </Text>
+
+          <DuoButton
+            label="Back to Lesson"
+            variant="primary"
+            onPress={onBack}
+            style={styles.mainButton}
+          />
+
+          <DuoButton
+            label="Try Again"
+            variant="outline"
+            onPress={handleTryAgain}
+            style={styles.mainButton}
+          />
+        </ScrollView>
+      </NavBarWrapper>
+    );
+  }
+
+  // ---------- Activity ----------
+  const progressPercent = ((currentIndex + (checked ? 1 : 0)) / total) * 100;
+
+  const primaryLabel = submitting
+    ? "Submitting..."
+    : !checked && keyKnown
+    ? "Check"
+    : isLast
+    ? "Finish Practice"
+    : "Next";
+
   return (
     <NavBarWrapper {...navProps}>
       <ScrollView
         style={styles.container}
         contentContainerStyle={styles.scrollContent}
+        keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
         <TouchableOpacity onPress={onBack}>
           <Text style={styles.backButton}>← Lesson</Text>
         </TouchableOpacity>
 
-        <Text style={styles.title}>Practice</Text>
+        <View style={styles.headerRow}>
+          <Text style={styles.title}>Practice</Text>
 
-        <Text style={styles.subtitle}>
-          Practice what you learned in this lesson.
-        </Text>
-
-        {practice.activities.map((activity, index) => {
-          const xp = getActivityXp(activity.type);
-          const correct = submitted && isCorrect(activity);
-
-          return (
-            <View key={activity.id} style={styles.activityCard}>
-              <View style={styles.activityHeader}>
-                <Text style={styles.number}>Activity {index + 1}</Text>
-
-                <View
-                  style={[
-                    styles.xpTag,
-                    { backgroundColor: isChoose(activity) ? colors.blueLight : colors.greenBg },
-                  ]}
-                >
-                  <Ionicons
-                    name={isChoose(activity) ? "radio-button-on" : "pencil"}
-                    size={12}
-                    color={isChoose(activity) ? colors.blueDark : colors.greenDark}
-                  />
-                  <Text
-                    style={[
-                      styles.xpTagText,
-                      { color: isChoose(activity) ? colors.blueDark : colors.greenDark },
-                    ]}
-                  >
-                    {xp} XP
-                  </Text>
-                </View>
-              </View>
-
-              <Text style={styles.question}>{activity.question}</Text>
-
-              {activity.sentence && (
-                <Text style={styles.sentence}>{activity.sentence}</Text>
-              )}
-
-              {isChoose(activity) ? (
-                (activity.options || []).map((option, optionIndex) => {
-                  const isSelected = answers[activity.id] === optionIndex;
-                  const isCorrectOption =
-                    typeof activity.answer === "number"
-                      ? optionIndex === activity.answer
-                      : normalize(option) === normalize(activity.answer);
-
-                  const optionStyle = [
-                    styles.option,
-                    submitted && isCorrectOption && styles.correctOption,
-                    submitted &&
-                      isSelected &&
-                      !isCorrectOption &&
-                      styles.incorrectOption,
-                    !submitted && isSelected && styles.selectedOption,
-                  ];
-
-                  return (
-                    <TouchableOpacity
-                      key={optionIndex}
-                      style={optionStyle}
-                      onPress={() =>
-                        handleChooseAnswer(activity.id, optionIndex)
-                      }
-                      disabled={submitted}
-                    >
-                      <View style={styles.optionLetter}>
-                        <Text style={styles.optionLetterText}>
-                          {String.fromCharCode(65 + optionIndex)}
-                        </Text>
-                      </View>
-
-                      <Text style={styles.optionText}>{option}</Text>
-
-                      {submitted && isCorrectOption && (
-                        <Ionicons name="checkmark-circle" size={20} color={colors.green} />
-                      )}
-
-                      {submitted && isSelected && !isCorrectOption && (
-                        <Ionicons name="close-circle" size={20} color={colors.red} />
-                      )}
-                    </TouchableOpacity>
-                  );
-                })
-              ) : (
-                <TextInput
-                  style={[
-                    styles.input,
-                    submitted && correct && styles.correctInput,
-                    submitted && !correct && styles.wrongInput,
-                  ]}
-                  placeholder="Type your answer"
-                  placeholderTextColor="#999"
-                  value={answers[activity.id] || ""}
-                  onChangeText={(value) =>
-                    handleTextAnswer(activity.id, value)
-                  }
-                  editable={!submitted}
-                />
-              )}
-
-              {submitted && !correct && (
-                <Text style={styles.answer}>
-                  Correct answer: {activity.answer}
-                </Text>
-              )}
-            </View>
-          );
-        })}
-
-        {!submitted ? (
-          <DuoButton
-            label="Check Answers"
-            variant="primary"
-            onPress={handleSubmit}
-            style={styles.mainButton}
-          />
-        ) : (
-          <View style={styles.resultCard}>
-            <View
+          <View
+            style={[
+              styles.xpTag,
+              {
+                backgroundColor: isChoose(activity)
+                  ? colors.blueLight
+                  : colors.greenBg,
+              },
+            ]}
+          >
+            <Ionicons
+              name={isChoose(activity) ? "radio-button-on" : "pencil"}
+              size={12}
+              color={isChoose(activity) ? colors.blueDark : colors.greenDark}
+            />
+            <Text
               style={[
-                styles.resultBadge,
+                styles.xpTagText,
                 {
-                  backgroundColor:
-                    results.score === practice.activities.length
-                      ? colors.gold
-                      : colors.green,
+                  color: isChoose(activity)
+                    ? colors.blueDark
+                    : colors.greenDark,
                 },
               ]}
             >
-              <Ionicons
-                name={
-                  results.score === practice.activities.length
-                    ? "trophy"
-                    : "checkmark-circle"
-                }
-                size={36}
-                color="#fff"
-              />
-            </View>
-
-            <Text style={styles.resultTitle}>Practice Complete</Text>
-
-            <Text style={styles.score}>
-              {results.score} / {practice.activities.length}
+              {getActivityXp(activity.type)} XP
             </Text>
-
-            <View style={styles.xpPill}>
-              <Ionicons name="flash" size={16} color={colors.blueDark} />
-              <Text style={styles.xpEarnedText}>
-                {results.xpEarned} / {results.xpPossible} XP earned
-              </Text>
-            </View>
-
-            <Text style={styles.resultText}>
-              {results.score === practice.activities.length
-                ? "Perfect run — nice work!"
-                : "Keep practicing to improve!"}
-            </Text>
-
-            <DuoButton
-              label="Try Again"
-              variant="outline"
-              onPress={handleTryAgain}
-              style={styles.mainButton}
-            />
-
-            <DuoButton
-              label="Back to Lesson"
-              variant="primary"
-              onPress={onBack}
-              style={styles.mainButton}
-            />
           </View>
-        )}
+        </View>
+
+        <Text style={styles.progress}>
+          Activity {currentIndex + 1} of {total}
+        </Text>
+
+        <View style={styles.progressTrack}>
+          <View
+            style={[styles.progressFill, { width: `${progressPercent}%` }]}
+          />
+        </View>
+
+        <View style={styles.activityCard}>
+          <Text style={styles.question}>{activity.question}</Text>
+
+          {activity.sentence && (
+            <Text style={styles.sentence}>{activity.sentence}</Text>
+          )}
+
+          {isChoose(activity) ? (
+            (activity.options || []).map((option, optionIndex) => {
+              const isSelected = userAnswer === optionIndex;
+              const isCorrectOption =
+                keyKnown &&
+                (typeof activity.answer === "number"
+                  ? optionIndex === activity.answer
+                  : normalize(option) === normalize(activity.answer));
+
+              const showCorrect = checked && isCorrectOption;
+              const showIncorrect = checked && isSelected && !isCorrectOption;
+              const showSelected = !checked && isSelected;
+
+              return (
+                <TouchableOpacity
+                  key={optionIndex}
+                  style={[
+                    styles.option,
+                    showSelected && styles.selectedOption,
+                    showCorrect && styles.correctOption,
+                    showIncorrect && styles.incorrectOption,
+                  ]}
+                  onPress={() => handleChooseAnswer(optionIndex)}
+                  disabled={checked}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: isSelected }}
+                >
+                  <View
+                    style={[
+                      styles.optionLetter,
+                      showSelected && styles.optionLetterSelected,
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.optionLetterText,
+                        showSelected && styles.optionLetterTextSelected,
+                      ]}
+                    >
+                      {String.fromCharCode(65 + optionIndex)}
+                    </Text>
+                  </View>
+
+                  <Text
+                    style={[
+                      styles.optionText,
+                      (showSelected || showCorrect || showIncorrect) &&
+                        styles.selectedOptionText,
+                    ]}
+                  >
+                    {option}
+                  </Text>
+
+                  {showCorrect && (
+                    <Ionicons
+                      name="checkmark-circle"
+                      size={22}
+                      color={colors.green}
+                    />
+                  )}
+
+                  {showIncorrect && (
+                    <Ionicons
+                      name="close-circle"
+                      size={22}
+                      color={colors.red}
+                    />
+                  )}
+                </TouchableOpacity>
+              );
+            })
+          ) : (
+            <TextInput
+              style={[
+                styles.input,
+                correct && styles.correctInput,
+                wrong && styles.wrongInput,
+              ]}
+              placeholder="Type your answer"
+              placeholderTextColor="#999"
+              value={typeof userAnswer === "string" ? userAnswer : ""}
+              onChangeText={handleTextAnswer}
+              editable={!checked}
+              autoCapitalize="none"
+              autoCorrect={false}
+              returnKeyType="done"
+              onSubmitEditing={handlePrimaryPress}
+            />
+          )}
+
+          {wrong && (
+            <Text style={styles.answer}>
+              Correct answer: {String(getAnswerLabel(activity))}
+            </Text>
+          )}
+
+          {correct && <Text style={styles.correctText}>Correct!</Text>}
+        </View>
+
+        <DuoButton
+          label={primaryLabel}
+          variant="primary"
+          disabled={!hasAnswer || submitting}
+          onPress={handlePrimaryPress}
+          style={styles.mainButton}
+        />
       </ScrollView>
     </NavBarWrapper>
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (colors) => StyleSheet.create({
   screen: {
     flex: 1,
     backgroundColor: colors.screenBg,
@@ -422,6 +527,13 @@ const styles = StyleSheet.create({
     color: colors.blue,
   },
 
+  headerRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginTop: 20,
+  },
+
   title: {
     fontSize: 26,
     fontWeight: "800",
@@ -435,25 +547,34 @@ const styles = StyleSheet.create({
     marginBottom: 22,
   },
 
+  progress: {
+    color: colors.textMuted,
+    marginTop: 10,
+    marginBottom: 8,
+    fontSize: 13,
+    fontWeight: "600",
+  },
+
+  progressTrack: {
+    height: 12,
+    borderRadius: radius.full,
+    backgroundColor: colors.border,
+    overflow: "hidden",
+    marginBottom: 20,
+  },
+
+  progressFill: {
+    height: "100%",
+    borderRadius: radius.full,
+    backgroundColor: colors.green,
+  },
+
   activityCard: {
     backgroundColor: "#fff",
     borderRadius: radius.lg,
     padding: 20,
-    marginBottom: 15,
     borderWidth: 2,
     borderColor: colors.border,
-  },
-
-  activityHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-  },
-
-  number: {
-    fontSize: 13,
-    color: colors.textMuted,
-    fontWeight: "700",
   },
 
   xpTag: {
@@ -471,16 +592,16 @@ const styles = StyleSheet.create({
   },
 
   question: {
-    fontSize: 17,
+    fontSize: 19,
     fontWeight: "700",
-    marginTop: 12,
+    lineHeight: 26,
     color: colors.text,
   },
 
   sentence: {
     fontSize: 16,
     marginTop: 15,
-    marginBottom: 12,
+    marginBottom: 4,
     color: colors.text,
   },
 
@@ -491,6 +612,7 @@ const styles = StyleSheet.create({
     padding: 13,
     fontSize: 15,
     marginTop: 14,
+    color: colors.text,
   },
 
   correctInput: {
@@ -514,8 +636,8 @@ const styles = StyleSheet.create({
   },
 
   selectedOption: {
-    backgroundColor: colors.bgMuted,
-    borderColor: colors.text,
+    backgroundColor: colors.blueLight,
+    borderColor: colors.blue,
   },
 
   correctOption: {
@@ -529,13 +651,17 @@ const styles = StyleSheet.create({
   },
 
   optionLetter: {
-    width: 26,
-    height: 26,
-    borderRadius: 13,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
     backgroundColor: colors.bgMuted,
     justifyContent: "center",
     alignItems: "center",
     marginRight: 12,
+  },
+
+  optionLetterSelected: {
+    backgroundColor: colors.blue,
   },
 
   optionLetterText: {
@@ -544,51 +670,61 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
   },
 
+  optionLetterTextSelected: {
+    color: "#fff",
+  },
+
   optionText: {
     fontSize: 15,
     flex: 1,
     color: colors.text,
   },
 
+  selectedOptionText: {
+    fontWeight: "700",
+  },
+
   answer: {
     color: colors.textMuted,
-    marginTop: 10,
-    fontSize: 13,
+    marginTop: 12,
+    fontSize: 14,
+    fontWeight: "600",
+  },
+
+  correctText: {
+    color: colors.greenDark,
+    marginTop: 12,
+    fontSize: 14,
+    fontWeight: "800",
   },
 
   mainButton: {
-    marginTop: 12,
-  },
-
-  resultCard: {
-    backgroundColor: "#fff",
-    borderRadius: radius.lg,
-    padding: 25,
-    alignItems: "center",
-    marginBottom: 20,
-    borderWidth: 2,
-    borderColor: colors.border,
+    marginTop: 20,
   },
 
   resultBadge: {
-    width: 72,
-    height: 72,
-    borderRadius: 36,
+    width: 88,
+    height: 88,
+    borderRadius: 44,
     justifyContent: "center",
     alignItems: "center",
+    alignSelf: "center",
+    marginTop: 60,
   },
 
   resultTitle: {
-    fontSize: 20,
+    fontSize: 24,
     fontWeight: "800",
-    marginTop: 12,
+    textAlign: "center",
+    marginTop: 16,
     color: colors.text,
   },
 
   score: {
-    fontSize: 36,
+    fontSize: 48,
     fontWeight: "800",
-    marginTop: 15,
+    textAlign: "center",
+    marginTop: 16,
     color: colors.text,
   },
 
@@ -596,11 +732,12 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 6,
+    alignSelf: "center",
     backgroundColor: colors.blueLight,
     borderRadius: radius.full,
     paddingHorizontal: 14,
     paddingVertical: 8,
-    marginTop: 12,
+    marginTop: 14,
   },
 
   xpEarnedText: {
@@ -610,7 +747,9 @@ const styles = StyleSheet.create({
   },
 
   resultText: {
+    fontSize: 14,
     color: colors.textMuted,
+    textAlign: "center",
     marginTop: 10,
   },
 });

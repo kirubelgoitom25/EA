@@ -1,16 +1,19 @@
-import React from "react";
+import React, { useMemo } from "react";
 import { View, Text, StyleSheet, TouchableOpacity, Platform } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { colors } from "../theme";
+import { radius, useTheme } from "../theme";
 
 const TABS = [
-  { key: "home", label: "Home", icon: "home", color: colors.green },
-  { key: "courses", label: "Courses", icon: "book", color: colors.blue },
-  { key: "ranking", label: "Ranking", icon: "trophy", color: colors.gold },
-  { key: "profile", label: "Profile", icon: "person", color: colors.purple },
+  { key: "home", label: "Home", icon: "home" },
+  { key: "courses", label: "Courses", icon: "book" },
+  { key: "ranking", label: "Ranking", icon: "trophy" },
+  { key: "profile", label: "Profile", icon: "person" },
 ];
 
 export default function BottomNavBar({ active, onNavigate }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
+
   return (
     <View style={styles.wrapper}>
       {TABS.map((tab) => {
@@ -21,27 +24,17 @@ export default function BottomNavBar({ active, onNavigate }) {
             key={tab.key}
             style={styles.tab}
             onPress={() => onNavigate(tab.key)}
-            activeOpacity={0.7}
+            activeOpacity={0.8}
           >
-            <View
-              style={[
-                styles.iconWrap,
-                isActive && { backgroundColor: `${tab.color}22` },
-              ]}
-            >
+            <View style={[styles.iconWrap, isActive && styles.activeIconWrap]}>
               <Ionicons
                 name={isActive ? tab.icon : `${tab.icon}-outline`}
                 size={22}
-                color={isActive ? tab.color : "#b0b6c0"}
+                color={isActive ? colors.orange : colors.textSecondary}
               />
             </View>
 
-            <Text
-              style={[
-                styles.label,
-                isActive && { color: tab.color, fontWeight: "800" },
-              ]}
-            >
+            <Text style={[styles.label, isActive && styles.activeLabel]}>
               {tab.label}
             </Text>
           </TouchableOpacity>
@@ -51,37 +44,57 @@ export default function BottomNavBar({ active, onNavigate }) {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (colors) => StyleSheet.create({
   wrapper: {
     position: "absolute",
-    left: 0,
-    right: 0,
-    bottom: 0,
+    left: 16,
+    right: 16,
+    bottom: 14,
     flexDirection: "row",
-    backgroundColor: "#fff",
-    paddingTop: 8,
-    paddingBottom: Platform.OS === "ios" ? 26 : 14,
-    borderTopWidth: 2,
-    borderTopColor: "#f0f0f0",
+    backgroundColor: colors.orangeLight,
+    borderRadius: radius.xl,
+    paddingTop: 10,
+    paddingBottom: Platform.OS === "ios" ? 22 : 10,
+    paddingHorizontal: 10,
+    borderWidth: 1.5,
+    borderColor: colors.orangeSoft,
+    shadowColor: colors.orange,
+    shadowOpacity: 0.18,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 6,
   },
 
   tab: {
     flex: 1,
     alignItems: "center",
-    gap: 2,
+    justifyContent: "center",
+    paddingVertical: 6,
   },
 
   iconWrap: {
-    width: 40,
+    width: 48,
     height: 32,
-    borderRadius: 12,
+    borderRadius: radius.full,
     justifyContent: "center",
     alignItems: "center",
+    marginBottom: 2,
+  },
+
+  activeIconWrap: {
+    backgroundColor: "#fff",
+    borderBottomWidth: 3,
+    borderBottomColor: colors.orangeDeep,
   },
 
   label: {
     fontSize: 11,
     fontWeight: "700",
-    color: "#b0b6c0",
+    color: colors.textSecondary,
+  },
+
+  activeLabel: {
+    color: colors.orangeDeep,
+    fontWeight: "800",
   },
 });

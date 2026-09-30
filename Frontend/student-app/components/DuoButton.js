@@ -1,15 +1,18 @@
-import React, { useRef } from "react";
+import React, { useMemo, useRef } from "react";
 import { Text, StyleSheet, Animated, Pressable } from "react-native";
-import { colors, radius } from "../theme";
+import { radius, useTheme } from "../theme";
 
-const VARIANTS = {
-  primary: { bg: colors.green, depth: colors.greenDark, text: "#fff" },
+const getVariants = (colors) => ({
+  primary: { bg: colors.orange, depth: colors.orangeDeep, text: "#fff" },
   blue: { bg: colors.blue, depth: colors.blueDark, text: "#fff" },
-  gold: { bg: colors.gold, depth: colors.goldDark, text: "#4a3900" },
+  gold: { bg: colors.yellow, depth: colors.yellowDeep, text: "#533400" },
   danger: { bg: colors.red, depth: colors.redDark, text: "#fff" },
-  outline: { bg: "#fff", depth: colors.border, text: colors.text },
-  disabled: { bg: colors.locked, depth: colors.lockedDark, text: "#9a9a9a" },
-};
+  outline: { bg: colors.card, depth: colors.border, text: colors.text },
+  secondary: { bg: colors.card, depth: colors.border, text: colors.text },
+  success: { bg: colors.mint, depth: "#2AAE72", text: "#fff" },
+  warning: { bg: colors.yellow, depth: colors.yellowDeep, text: "#533400" },
+  disabled: { bg: colors.locked, depth: colors.lockedDark, text: "#726964" },
+});
 
 export default function DuoButton({
   label,
@@ -19,10 +22,17 @@ export default function DuoButton({
   style,
   icon,
 }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
+  const variants = getVariants(colors);
   const pressAnim = useRef(new Animated.Value(0)).current;
-  const scheme = VARIANTS[disabled ? "disabled" : variant];
+  const scheme = variants[disabled ? "disabled" : variant] || variants.primary;
 
   const handlePressIn = () => {
+    if (disabled) {
+      return;
+    }
+
     Animated.timing(pressAnim, {
       toValue: 1,
       duration: 80,
@@ -40,7 +50,7 @@ export default function DuoButton({
 
   const translateY = pressAnim.interpolate({
     inputRange: [0, 1],
-    outputRange: [0, 3],
+    outputRange: [0, 2],
   });
 
   return (
@@ -49,6 +59,7 @@ export default function DuoButton({
       onPressIn={handlePressIn}
       onPressOut={handlePressOut}
       disabled={disabled}
+      style={styles.pressable}
     >
       <Animated.View
         style={[
@@ -68,21 +79,26 @@ export default function DuoButton({
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (colors) => StyleSheet.create({
+  pressable: {
+    alignSelf: "stretch",
+  },
+
   button: {
     flexDirection: "row",
     justifyContent: "center",
     alignItems: "center",
     gap: 8,
-    height: 54,
-    borderRadius: radius.md,
+    minHeight: 56,
+    borderRadius: radius.full,
     borderBottomWidth: 4,
-    paddingHorizontal: 20,
+    paddingHorizontal: 22,
+    paddingVertical: 12,
   },
 
   label: {
     fontSize: 16,
     fontWeight: "800",
-    letterSpacing: 0.3,
+    letterSpacing: 0.2,
   },
 });

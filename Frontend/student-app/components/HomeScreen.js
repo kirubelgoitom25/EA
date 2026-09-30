@@ -11,22 +11,18 @@ import {
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
 
-
-import { colors, radius } from "../theme";
+import { radius, useTheme } from "../theme";
 import BottomNavBar from "./BottomNavBar";
 import XpProgressRing from "./XpProgressRing";
 import DuoButton from "./DuoButton";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
-const CARD_WIDTH = SCREEN_WIDTH * 0.72;
+const CARD_WIDTH = SCREEN_WIDTH * 0.76;
 const CARD_STRIDE = CARD_WIDTH + 14;
 const WEEK_DAYS = ["M", "T", "W", "T", "F", "S", "S"];
 
 const getInitials = (name) => {
-  if (!name) {
-    return "?";
-  }
-
+  if (!name) return "?";
   return name
     .trim()
     .split(/\s+/)
@@ -42,9 +38,7 @@ const getGreeting = () => {
   return "Good evening";
 };
 
-// Simple heuristic to give each subject its own icon/color since
-// the data doesn't carry a category field yet.
-const getCourseVisual = (title = "") => {
+const getCourseVisual = (title = "", colors) => {
   const lower = title.toLowerCase();
 
   if (/python|code|javascript|programming|script/.test(lower)) {
@@ -52,18 +46,16 @@ const getCourseVisual = (title = "") => {
   }
 
   if (/english|spanish|french|language/.test(lower)) {
-    return { icon: "language", color: colors.purple, bg: "#f3e6ff" };
+    return { icon: "language", color: colors.purple, bg: "#F3EAFF" };
   }
 
-  return { icon: "book", color: colors.green, bg: colors.greenBg };
+  return { icon: "book", color: colors.orangeDeep, bg: colors.orangeLight };
 };
 
 const getNextLessonTitle = (course) => {
   for (const module of course.modules || []) {
     const next = module.lessons.find((lesson) => !lesson.completed);
-    if (next) {
-      return next.title;
-    }
+    if (next) return next.title;
   }
   return null;
 };
@@ -76,9 +68,7 @@ const useCountUp = (target, duration = 600) => {
     const from = fromRef.current;
     const diff = target - from;
 
-    if (diff === 0) {
-      return;
-    }
+    if (diff === 0) return;
 
     const start = Date.now();
     let frame;
@@ -109,16 +99,8 @@ function StreakFlame({ size = 16 }) {
   useEffect(() => {
     const loop = Animated.loop(
       Animated.sequence([
-        Animated.timing(pulse, {
-          toValue: 1.18,
-          duration: 550,
-          useNativeDriver: true,
-        }),
-        Animated.timing(pulse, {
-          toValue: 1,
-          duration: 550,
-          useNativeDriver: true,
-        }),
+        Animated.timing(pulse, { toValue: 1.18, duration: 550, useNativeDriver: true }),
+        Animated.timing(pulse, { toValue: 1, duration: 550, useNativeDriver: true }),
       ])
     );
 
@@ -127,12 +109,7 @@ function StreakFlame({ size = 16 }) {
   }, []);
 
   return (
-    <Animated.Text
-      style={[
-        styles.flameEmoji,
-        { fontSize: size, transform: [{ scale: pulse }] },
-      ]}
-    >
+    <Animated.Text style={{ lineHeight: 18, fontSize: size, transform: [{ scale: pulse }] }}>
       🔥
     </Animated.Text>
   );
@@ -147,7 +124,9 @@ export default function HomeScreen({
   onRanking,
   onSelectCourse,
 }) {
-  const animatedXp = useCountUp(user.xp);
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
+  const animatedXp = useCountUp(Number(user.xp) || 0);
   const [activeCourseIndex, setActiveCourseIndex] = useState(0);
 
   const leaderboard = useMemo(() => {
@@ -167,21 +146,18 @@ export default function HomeScreen({
 
   const currentUserEntry = leaderboard.find((item) => item.isCurrentUser);
   const podium = leaderboard.slice(0, 3);
-  const currentUserInPodium = podium.some((item) => item.isCurrentUser);
-  const nextFew = leaderboard.slice(3, 5);
+  const podiumOrder = [podium[1], podium[0], podium[2]].filter(Boolean);
 
   const inProgressCourses = courses.filter((course) => course.progress < 100);
   const continueLearningCourses =
     inProgressCourses.length > 0 ? inProgressCourses : courses;
 
-  const podiumOrder = [podium[1], podium[0], podium[2]].filter(Boolean);
-  const podiumHeights = { 0: 78, 1: 100, 2: 64 };
-  const MEDAL_COLORS = { 1: colors.gold, 2: "#c0c0c0", 3: "#cd7f32" };
-
-  // Approximate weekly streak calendar: fills the most recent
-  // `streak` days (capped at 7) since there's no per-day activity
-  // log in the data yet — purely a visual approximation.
   const filledDaysFromEnd = Math.min(user.streak ?? 0, 7);
+  const todayLabel = new Intl.DateTimeFormat("en-US", {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+  }).format(new Date());
 
   const handleCarouselScroll = (event) => {
     const offsetX = event.nativeEvent.contentOffset.x;
@@ -191,81 +167,91 @@ export default function HomeScreen({
 
   return (
     <View style={styles.screen}>
-      <ScrollView
-        style={styles.container}
-        contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
-      >
-        {/* Header */}
+      <ScrollView style={styles.container} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
         <View style={styles.header}>
           <View>
+            <Text style={styles.dateText}>{todayLabel}</Text>
             <Text style={styles.greeting}>
               {getGreeting()}, {user.name} 👋
             </Text>
-            <Text style={styles.subtitle}>Welcome back to EA</Text>
           </View>
 
           <TouchableOpacity onPress={onProfile} style={styles.avatarButton}>
-            <Text style={styles.avatarButtonText}>
-              {getInitials(user.name)}
-            </Text>
+            <Text style={styles.avatarButtonText}>{getInitials(user.name)}</Text>
           </TouchableOpacity>
         </View>
 
-        {/* Stats: XP ring + streak + rank */}
         <LinearGradient
-          colors={[colors.green, colors.greenDark]}
+          colors={[colors.orange, colors.orangeDeep]}
           start={{ x: 0, y: 0 }}
           end={{ x: 1, y: 1 }}
-          style={styles.statsCard}
+          style={styles.heroCard}
         >
-          <XpProgressRing xp={user.xp} />
-
-          <View style={styles.statsDivider} />
-
-          <View style={styles.statBlock}>
-            <Text style={styles.statValueLight}>⭐ {animatedXp}</Text>
-            <Text style={styles.statLabelLight}>Total XP</Text>
-          </View>
-
-          <View style={styles.statBlock}>
-            <View style={styles.streakRow}>
-              <StreakFlame />
-              <Text style={styles.statValueLight}>{user.streak}</Text>
+          <View style={styles.heroTopRow}>
+            <View>
+              <Text style={styles.heroEyebrow}>STREAK</Text>
+              <Text style={styles.heroTitle}>Keep your streak alive</Text>
             </View>
-            <Text style={styles.statLabelLight}>Day Streak</Text>
+            <View style={styles.flameBadge}>
+              <Ionicons name="flame" size={18} color="#fff" />
+            </View>
           </View>
 
-          <View style={styles.statBlock}>
-            <Text style={styles.statValueLight}>
-              #{currentUserEntry?.position ?? "—"}
-            </Text>
-            <Text style={styles.statLabelLight}>Rank</Text>
+          <Text style={styles.heroStreak}>{user.streak ?? 0} day streak</Text>
+          <Text style={styles.heroSub}>You’re on a strong rhythm this week.</Text>
+
+          <View style={styles.heroStatsRow}>
+            <View style={styles.heroStat}>
+              <Text style={styles.heroStatValue}>{animatedXp}</Text>
+              <Text style={styles.heroStatLabel}>XP</Text>
+            </View>
+            <View style={styles.heroStatDivider} />
+            <View style={styles.heroStat}>
+              <Text style={styles.heroStatValue}>#{currentUserEntry?.position ?? "—"}</Text>
+              <Text style={styles.heroStatLabel}>Rank</Text>
+            </View>
           </View>
         </LinearGradient>
 
-        {/* Weekly streak calendar */}
-        <View style={styles.streakCard}>
-          <View style={styles.streakCardHeader}>
-            <StreakFlame size={18} />
-            <Text style={styles.streakCardTitle}>This Week</Text>
+        <View style={styles.statsRow}>
+          <View style={styles.metricCard}>
+            <View style={styles.metricIconWrap}>
+              <Ionicons name="star" size={16} color={colors.orangeDeep} />
+            </View>
+            <Text style={styles.metricValue}>{animatedXp}</Text>
+            <Text style={styles.metricLabel}>XP</Text>
+          </View>
+
+          <View style={styles.metricCard}>
+            <View style={styles.metricIconWrap}>
+              <Ionicons name="flame" size={16} color={colors.orangeDeep} />
+            </View>
+            <Text style={styles.metricValue}>{user.streak ?? 0}</Text>
+            <Text style={styles.metricLabel}>Streak</Text>
+          </View>
+
+          <View style={styles.metricCard}>
+            <View style={styles.metricIconWrap}>
+              <Ionicons name="trophy" size={16} color={colors.orangeDeep} />
+            </View>
+            <Text style={styles.metricValue}>#{currentUserEntry?.position ?? "—"}</Text>
+            <Text style={styles.metricLabel}>Rank</Text>
+          </View>
+        </View>
+
+        <View style={styles.sectionCard}>
+          <View style={styles.sectionHeaderRow}>
+            <Text style={styles.sectionTitle}>YOUR RHYTHM</Text>
+            <Text style={styles.sectionMeta}>{user.streak ?? 0} days</Text>
           </View>
 
           <View style={styles.weekRow}>
             {WEEK_DAYS.map((label, index) => {
               const isFilled = index >= 7 - filledDaysFromEnd;
-
               return (
                 <View key={index} style={styles.dayColumn}>
-                  <View
-                    style={[
-                      styles.dayCircle,
-                      isFilled && styles.dayCircleFilled,
-                    ]}
-                  >
-                    {isFilled && (
-                      <Ionicons name="flame" size={14} color="#fff" />
-                    )}
+                  <View style={[styles.dayCircle, isFilled && styles.dayCircleFilled]}>
+                    {isFilled && <Ionicons name="flame" size={12} color="#fff" />}
                   </View>
                   <Text style={styles.dayLabel}>{label}</Text>
                 </View>
@@ -274,9 +260,8 @@ export default function HomeScreen({
           </View>
         </View>
 
-        {/* Continue Learning — horizontal carousel */}
         <View style={styles.sectionHeaderRow}>
-          <Text style={styles.sectionTitle}>Continue Learning</Text>
+          <Text style={styles.sectionTitle}>CONTINUE LEARNING</Text>
         </View>
 
         <ScrollView
@@ -289,52 +274,29 @@ export default function HomeScreen({
           scrollEventThrottle={16}
         >
           {continueLearningCourses.map((course) => {
-            const visual = getCourseVisual(course.title);
+            const visual = getCourseVisual(course.title, colors);
             const nextLesson = getNextLessonTitle(course);
 
             return (
               <View key={course.id} style={styles.courseCard}>
                 <View style={styles.courseTopRow}>
-                  <View
-                    style={[
-                      styles.courseIconWrap,
-                      { backgroundColor: visual.bg },
-                    ]}
-                  >
-                    <Ionicons name={visual.icon} size={20} color={visual.color} />
+                  <View style={[styles.courseIconWrap, { backgroundColor: visual.bg }]}>
+                    <Ionicons name={visual.icon} size={22} color={visual.color} />
                   </View>
-
                   {course.progress === 100 && (
                     <View style={styles.doneBadge}>
-                      <Ionicons
-                        name="checkmark"
-                        size={12}
-                        color={colors.greenDark}
-                      />
+                      <Ionicons name="checkmark" size={12} color={colors.mint} />
                       <Text style={styles.doneBadgeText}>Done</Text>
                     </View>
                   )}
                 </View>
 
-                <Text style={styles.courseTitle} numberOfLines={1}>
-                  {course.title}
-                </Text>
-
-                <Text style={styles.courseDescription} numberOfLines={1}>
-                  {nextLesson ? `Next: ${nextLesson}` : course.description}
-                </Text>
-
-                <Text style={styles.progressText}>
-                  {course.completedLessons} / {course.totalLessons} lessons
-                </Text>
+                <Text style={styles.courseTitle} numberOfLines={1}>{course.title}</Text>
+                <Text style={styles.courseDescription} numberOfLines={2}>{nextLesson || course.description}</Text>
+                <Text style={styles.progressText}>{course.completedLessons} / {course.totalLessons} lessons</Text>
 
                 <View style={styles.progressBackground}>
-                  <View
-                    style={[
-                      styles.progressBar,
-                      { width: `${course.progress}%` },
-                    ]}
-                  />
+                  <View style={[styles.progressBar, { width: `${course.progress}%` }]} />
                 </View>
 
                 <DuoButton
@@ -342,6 +304,7 @@ export default function HomeScreen({
                   variant="primary"
                   onPress={() => onSelectCourse(course)}
                   icon={<Ionicons name="arrow-forward" size={16} color="#fff" />}
+                  style={styles.courseButton}
                 />
               </View>
             );
@@ -351,123 +314,46 @@ export default function HomeScreen({
         {continueLearningCourses.length > 1 && (
           <View style={styles.dotsRow}>
             {continueLearningCourses.map((course, index) => (
-              <View
-                key={course.id}
-                style={[
-                  styles.dot,
-                  index === activeCourseIndex && styles.dotActive,
-                ]}
-              />
+              <View key={course.id} style={[styles.dot, index === activeCourseIndex && styles.dotActive]} />
             ))}
           </View>
         )}
 
         <TouchableOpacity style={styles.coursesButton} onPress={onCourses}>
-          <Text style={styles.coursesButtonText}>View All Courses →</Text>
+          <Text style={styles.coursesButtonText}>View all courses →</Text>
         </TouchableOpacity>
 
-        {/* Leaderboard */}
         <View style={styles.sectionHeaderRow}>
-          <Text style={styles.sectionTitle}>🏆 Weekly Ranking</Text>
-
+          <Text style={styles.sectionTitle}>WEEKLY RANKING</Text>
           <TouchableOpacity onPress={onRanking}>
-            <Text style={styles.viewRanking}>View All</Text>
+            <Text style={styles.viewRanking}>View all</Text>
           </TouchableOpacity>
         </View>
 
-        <LinearGradient
-          colors={[colors.purple, colors.purpleDark]}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
-          style={styles.leaderboardCard}
-        >
+        <LinearGradient colors={[colors.orangeLight, colors.card]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.rankCard}>
           <View style={styles.podiumRow}>
-            {podiumOrder.map((entry, slot) => {
-              if (!entry) {
-                return <View key={slot} style={styles.podiumSlot} />;
-              }
-
+            {podiumOrder.map((entry, index) => {
+              if (!entry) return <View key={index} style={styles.podiumSlot} />;
               const isFirst = entry.position === 1;
-              const medalColor = MEDAL_COLORS[entry.position];
-
               return (
-                <View
-                  key={entry.id}
-                  style={[styles.podiumSlot, { justifyContent: "flex-end" }]}
-                >
-                  <Ionicons
-                    name="trophy"
-                    size={isFirst ? 26 : 18}
-                    color={medalColor}
-                    style={styles.medal}
-                  />
-
-                  <View
-                    style={[
-                      styles.podiumAvatar,
-                      isFirst && styles.podiumAvatarFirst,
-                      entry.isCurrentUser && styles.podiumAvatarSelf,
-                    ]}
-                  >
-                    <Text
-                      style={[
-                        styles.podiumAvatarText,
-                        isFirst && styles.podiumAvatarTextFirst,
-                      ]}
-                    >
-                      {getInitials(entry.name)}
-                    </Text>
+                <View key={entry.id} style={styles.podiumSlot}>
+                  <Ionicons name="trophy-outline" size={isFirst ? 18 : 16} color={isFirst ? colors.yellow : colors.textSecondary} />
+                  <View style={[styles.podiumAvatar, isFirst && styles.podiumAvatarFirst, entry.isCurrentUser && styles.podiumAvatarSelf]}>
+                    <Text style={styles.podiumAvatarText}>{getInitials(entry.name)}</Text>
                   </View>
-
-                  <Text style={styles.podiumName} numberOfLines={1}>
-                    {entry.isCurrentUser ? "You" : entry.name}
-                  </Text>
-
+                  <Text style={styles.podiumName} numberOfLines={1}>{entry.isCurrentUser ? "You" : entry.name}</Text>
                   <Text style={styles.podiumXp}>{entry.xp} XP</Text>
-
-                  <View
-                    style={[
-                      styles.podiumBar,
-                      {
-                        height: podiumHeights[slot],
-                        backgroundColor: `${medalColor}55`,
-                      },
-                    ]}
-                  />
                 </View>
               );
             })}
           </View>
-
-          {nextFew.length > 0 && (
-            <View style={styles.restList}>
-              {nextFew.map((entry) => (
-                <View key={entry.id} style={styles.restRow}>
-                  <Text style={styles.restPosition}>#{entry.position}</Text>
-                  <Text style={styles.restName} numberOfLines={1}>
-                    {entry.name}
-                  </Text>
-                  <Text style={styles.restXp}>{entry.xp} XP</Text>
-                </View>
-              ))}
-            </View>
-          )}
-
-          {!currentUserInPodium && currentUserEntry && (
-            <View style={styles.yourPositionCard}>
-              <Text style={styles.restPosition}>
-                #{currentUserEntry.position}
-              </Text>
-              <Text style={styles.restName}>You</Text>
-              <Text style={styles.restXp}>{currentUserEntry.xp} XP</Text>
-            </View>
-          )}
         </LinearGradient>
       </ScrollView>
 
       <BottomNavBar
         active="home"
         onNavigate={(tab) => {
+          if (tab === "home") return;
           if (tab === "courses") onCourses();
           if (tab === "ranking") onRanking();
           if (tab === "profile") onProfile();
@@ -477,400 +363,105 @@ export default function HomeScreen({
   );
 }
 
-const styles = StyleSheet.create({
-  screen: {
-    flex: 1,
-    backgroundColor: colors.screenBg,
-  },
-
-  container: {
-    flex: 1,
-  },
-
-  scrollContent: {
-    padding: 20,
-    paddingBottom: 110,
-  },
+const createStyles = (colors) => StyleSheet.create({
+  screen: { flex: 1, backgroundColor: colors.screenBg },
+  container: { flex: 1 },
+  scrollContent: { paddingHorizontal: 20, paddingTop: 54, paddingBottom: 120 },
 
   header: {
-    marginTop: 40,
-    marginBottom: 20,
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
+    marginBottom: 18,
   },
-
+  dateText: {
+    fontSize: 12,
+    color: colors.textMuted,
+    fontWeight: "700",
+    letterSpacing: 0.6,
+    marginBottom: 4,
+  },
   greeting: {
-    fontSize: 22,
+    fontSize: 26,
     fontWeight: "800",
     color: colors.text,
+    letterSpacing: -0.5,
   },
-
-  subtitle: {
-    fontSize: 14,
-    color: colors.textMuted,
-    marginTop: 4,
-  },
-
   avatarButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: colors.blue,
-    justifyContent: "center",
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    backgroundColor: colors.orange,
     alignItems: "center",
+    justifyContent: "center",
+    borderBottomWidth: 4,
+    borderBottomColor: colors.orangeDeep,
   },
-
   avatarButtonText: {
     color: "#fff",
     fontWeight: "800",
-    fontSize: 15,
-  },
-
-  statsCard: {
-    flexDirection: "row",
-    alignItems: "center",
-    borderRadius: radius.lg,
-    padding: 18,
-    marginBottom: 16,
-  },
-
-  statsDivider: {
-    width: 1,
-    height: 40,
-    backgroundColor: "rgba(255,255,255,0.25)",
-    marginHorizontal: 10,
-  },
-
-  statBlock: {
-    flex: 1,
-    alignItems: "center",
-  },
-
-  streakRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-  },
-
-  flameEmoji: {
     fontSize: 16,
   },
 
-  statValueLight: {
-    color: "#fff",
-    fontSize: 16,
-    fontWeight: "800",
-  },
+  heroCard: { borderRadius: radius.xl, padding: 18, marginBottom: 18, borderBottomWidth: 5, borderBottomColor: colors.orangeDeep },
+  heroTopRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 8 },
+  heroEyebrow: { color: "rgba(255,255,255,0.8)", fontSize: 11, fontWeight: "800", letterSpacing: 1, marginBottom: 6 },
+  heroTitle: { color: "#fff", fontSize: 22, fontWeight: "800" },
+  flameBadge: { width: 38, height: 38, borderRadius: 19, backgroundColor: "rgba(255,255,255,0.18)", alignItems: "center", justifyContent: "center" },
+  heroStreak: { color: "#fff", fontSize: 32, fontWeight: "900", letterSpacing: -1, marginTop: 6 },
+  heroSub: { color: "rgba(255,255,255,0.85)", fontSize: 13, marginTop: 4 },
+  heroStatsRow: { flexDirection: "row", alignItems: "center", marginTop: 18 },
+  heroStat: { flex: 1 },
+  heroStatValue: { color: "#fff", fontSize: 18, fontWeight: "800" },
+  heroStatLabel: { color: "rgba(255,255,255,0.8)", fontSize: 11, marginTop: 2, fontWeight: "700", letterSpacing: 0.6 },
+  heroStatDivider: { width: 1, height: 34, backgroundColor: "rgba(255,255,255,0.35)", marginHorizontal: 12 },
 
-  statLabelLight: {
-    color: "rgba(255,255,255,0.75)",
-    fontSize: 11,
-    marginTop: 4,
-    fontWeight: "600",
-  },
+  statsRow: { flexDirection: "row", justifyContent: "space-between", marginBottom: 20, gap: 10 },
+  metricCard: { flex: 1, backgroundColor: colors.card, borderRadius: radius.lg, paddingVertical: 14, alignItems: "center", borderWidth: 1, borderColor: colors.border },
+  metricIconWrap: { width: 32, height: 32, borderRadius: 16, backgroundColor: colors.orangeLight, alignItems: "center", justifyContent: "center", marginBottom: 8 },
+  metricValue: { fontSize: 16, fontWeight: "800", color: colors.text },
+  metricLabel: { fontSize: 11, fontWeight: "700", color: colors.textMuted, marginTop: 2 },
 
-  streakCard: {
-    backgroundColor: "#fff",
-    borderRadius: radius.lg,
-    padding: 16,
-    marginBottom: 28,
-    borderWidth: 2,
-    borderColor: colors.border,
-  },
+  sectionCard: { backgroundColor: colors.card, borderRadius: radius.xl, padding: 16, borderWidth: 1, borderColor: colors.border, marginBottom: 20 },
+  sectionHeaderRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 12 },
+  sectionTitle: { fontSize: 18, fontWeight: "800", color: colors.text, letterSpacing: 0.4 },
+  sectionMeta: { fontSize: 12, color: colors.orangeDeep, fontWeight: "800" },
 
-  streakCardHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    marginBottom: 12,
-  },
+  weekRow: { flexDirection: "row", justifyContent: "space-between" },
+  dayColumn: { alignItems: "center", gap: 8 },
+  dayCircle: { width: 32, height: 32, borderRadius: 16, backgroundColor: colors.bgSecondary, borderWidth: 1, borderColor: colors.border, alignItems: "center", justifyContent: "center" },
+  dayCircleFilled: { backgroundColor: colors.orange, borderColor: colors.orange },
+  dayLabel: { fontSize: 11, fontWeight: "700", color: colors.textMuted },
 
-  streakCardTitle: {
-    fontSize: 14,
-    fontWeight: "800",
-    color: colors.text,
-  },
+  carousel: { paddingRight: 16, paddingBottom: 8 },
+  courseCard: { width: CARD_WIDTH, backgroundColor: colors.card, borderRadius: radius.xl, padding: 18, borderWidth: 1, borderColor: colors.border, marginRight: 14 },
+  courseTopRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 12 },
+  courseIconWrap: { width: 46, height: 46, borderRadius: 16, alignItems: "center", justifyContent: "center" },
+  doneBadge: { flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: colors.mintLight, borderRadius: radius.full, paddingHorizontal: 8, paddingVertical: 4 },
+  doneBadgeText: { color: colors.mint, fontSize: 11, fontWeight: "800" },
+  courseTitle: { fontSize: 18, fontWeight: "800", color: colors.text, marginBottom: 4 },
+  courseDescription: { fontSize: 13, color: colors.textSecondary, marginBottom: 12 },
+  progressText: { fontSize: 12, fontWeight: "700", color: colors.textMuted, marginBottom: 10 },
+  progressBackground: { height: 10, borderRadius: 999, backgroundColor: colors.bgSecondary, overflow: "hidden", marginBottom: 14 },
+  progressBar: { height: "100%", backgroundColor: colors.orange, borderRadius: 999 },
+  courseButton: { marginTop: 4 },
 
-  weekRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-  },
+  dotsRow: { flexDirection: "row", justifyContent: "center", marginTop: 10, marginBottom: 16, gap: 6 },
+  dot: { width: 8, height: 8, borderRadius: 4, backgroundColor: colors.border },
+  dotActive: { width: 22, backgroundColor: colors.orange },
 
-  dayColumn: {
-    alignItems: "center",
-    gap: 6,
-  },
+  coursesButton: { alignSelf: "flex-end", marginBottom: 18 },
+  coursesButtonText: { color: colors.orangeDeep, fontWeight: "800", fontSize: 13 },
+  viewRanking: { color: colors.orangeDeep, fontWeight: "800", fontSize: 12 },
 
-  dayCircle: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: colors.bgMuted,
-    borderWidth: 2,
-    borderColor: colors.border,
-    justifyContent: "center",
-    alignItems: "center",
-  },
+  rankCard: { borderRadius: radius.xl, padding: 16, borderWidth: 1, borderColor: colors.border, overflow: "hidden", marginBottom: 22 },
+  podiumRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-end", minHeight: 100 },
+  podiumSlot: { flex: 1, alignItems: "center" },
+  podiumAvatar: { width: 42, height: 42, borderRadius: 21, backgroundColor: "rgba(255, 122, 69, 0.14)", borderWidth: 2, borderColor: colors.border, alignItems: "center", justifyContent: "center", marginVertical: 8 },
+  podiumAvatarFirst: { width: 52, height: 52, borderRadius: 26, backgroundColor: "rgba(255, 122, 69, 0.22)", borderColor: colors.yellow },
+  podiumAvatarSelf: { borderColor: colors.orangeDeep },
+  podiumAvatarText: { color: colors.text, fontWeight: "800", fontSize: 12 },
+  podiumName: { color: colors.text, fontSize: 11, fontWeight: "700", marginBottom: 2 },
+  podiumXp: { color: colors.textSecondary, fontSize: 10, fontWeight: "700" },
 
-  dayCircleFilled: {
-    backgroundColor: colors.gold,
-    borderColor: colors.goldDark,
-  },
-
-  dayLabel: {
-    fontSize: 11,
-    fontWeight: "700",
-    color: colors.textMuted,
-  },
-
-  sectionHeaderRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: 14,
-  },
-
-  sectionTitle: {
-    fontSize: 19,
-    fontWeight: "800",
-    color: colors.text,
-  },
-
-  viewRanking: {
-    fontSize: 13,
-    fontWeight: "700",
-    color: colors.purple,
-  },
-
-  carousel: {
-    paddingRight: 20,
-    paddingBottom: 4,
-  },
-
-  courseCard: {
-    width: CARD_WIDTH,
-    backgroundColor: "#fff",
-    borderRadius: radius.lg,
-    padding: 18,
-    marginRight: 14,
-    borderWidth: 2,
-    borderColor: colors.border,
-  },
-
-  courseTopRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-  },
-
-  courseIconWrap: {
-    width: 40,
-    height: 40,
-    borderRadius: radius.md,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-
-  courseTitle: {
-    fontSize: 17,
-    fontWeight: "800",
-    color: colors.text,
-    marginTop: 12,
-  },
-
-  doneBadge: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 3,
-    backgroundColor: colors.greenBg,
-    borderRadius: radius.full,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-  },
-
-  doneBadgeText: {
-    color: colors.greenDark,
-    fontSize: 11,
-    fontWeight: "800",
-  },
-
-  courseDescription: {
-    color: colors.textMuted,
-    marginTop: 4,
-    marginBottom: 14,
-    fontSize: 13,
-    fontWeight: "600",
-  },
-
-  progressText: {
-    fontSize: 12,
-    color: colors.textMuted,
-    fontWeight: "600",
-  },
-
-  progressBackground: {
-    height: 10,
-    backgroundColor: colors.border,
-    borderRadius: radius.full,
-    marginTop: 8,
-    marginBottom: 16,
-    overflow: "hidden",
-  },
-
-  progressBar: {
-    height: 10,
-    borderRadius: radius.full,
-    backgroundColor: colors.green,
-  },
-
-  dotsRow: {
-    flexDirection: "row",
-    justifyContent: "center",
-    gap: 6,
-    marginTop: 12,
-  },
-
-  dot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: colors.border,
-  },
-
-  dotActive: {
-    backgroundColor: colors.green,
-    width: 18,
-  },
-
-  coursesButton: {
-    backgroundColor: "#fff",
-    padding: 15,
-    borderRadius: radius.md,
-    alignItems: "center",
-    marginTop: 16,
-    marginBottom: 28,
-    borderWidth: 2,
-    borderColor: colors.border,
-  },
-
-  coursesButtonText: {
-    fontWeight: "700",
-    color: colors.text,
-  },
-
-  leaderboardCard: {
-    borderRadius: radius.lg + 4,
-    padding: 20,
-    marginBottom: 24,
-  },
-
-  podiumRow: {
-    flexDirection: "row",
-    alignItems: "flex-end",
-    justifyContent: "space-between",
-  },
-
-  podiumSlot: {
-    flex: 1,
-    alignItems: "center",
-  },
-
-  medal: {
-    marginBottom: 4,
-  },
-
-  podiumAvatar: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: "rgba(255,255,255,0.2)",
-    justifyContent: "center",
-    alignItems: "center",
-    marginBottom: 6,
-  },
-
-  podiumAvatarFirst: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-  },
-
-  podiumAvatarSelf: {
-    borderWidth: 3,
-    borderColor: colors.gold,
-  },
-
-  podiumAvatarText: {
-    color: "#fff",
-    fontWeight: "800",
-    fontSize: 13,
-  },
-
-  podiumAvatarTextFirst: {
-    fontSize: 16,
-  },
-
-  podiumName: {
-    color: "#fff",
-    fontSize: 12,
-    fontWeight: "700",
-    maxWidth: 80,
-  },
-
-  podiumXp: {
-    color: "rgba(255,255,255,0.7)",
-    fontSize: 11,
-    marginBottom: 8,
-    fontWeight: "600",
-  },
-
-  podiumBar: {
-    width: "70%",
-    borderTopLeftRadius: 8,
-    borderTopRightRadius: 8,
-  },
-
-  restList: {
-    marginTop: 18,
-    borderTopWidth: 1,
-    borderTopColor: "rgba(255,255,255,0.2)",
-    paddingTop: 12,
-  },
-
-  restRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingVertical: 8,
-  },
-
-  restPosition: {
-    width: 32,
-    color: "#fff",
-    fontWeight: "800",
-    fontSize: 13,
-  },
-
-  restName: {
-    flex: 1,
-    color: "#fff",
-    fontSize: 14,
-    fontWeight: "600",
-  },
-
-  restXp: {
-    color: "rgba(255,255,255,0.8)",
-    fontWeight: "700",
-    fontSize: 13,
-  },
-
-  yourPositionCard: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginTop: 14,
-    backgroundColor: "rgba(255,200,0,0.2)",
-    borderRadius: radius.md,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-  },
 });

@@ -1,22 +1,21 @@
-import React, { useEffect, useRef } from "react";
+import React, { useEffect, useMemo, useRef } from "react";
 import { View, Text, StyleSheet, Animated } from "react-native";
 import Svg, { Circle } from "react-native-svg";
 
-const AnimatedCircle = Animated.createAnimatedComponent(Circle);
+import { useTheme } from "../theme";
 
-// Purely cosmetic leveling derived from total XP — there's no
-// separate "level" field in the data, so this is just XP / 200,
-// consistent every render.
+const AnimatedCircle = Animated.createAnimatedComponent(Circle);
 const XP_PER_LEVEL = 200;
 
 export default function XpProgressRing({ xp, size = 84, strokeWidth = 8 }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const level = Math.floor(xp / XP_PER_LEVEL) + 1;
   const xpIntoLevel = xp % XP_PER_LEVEL;
   const percent = xpIntoLevel / XP_PER_LEVEL;
 
   const radius = (size - strokeWidth) / 2;
   const circumference = 2 * Math.PI * radius;
-
   const animatedPercent = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
@@ -39,7 +38,7 @@ export default function XpProgressRing({ xp, size = 84, strokeWidth = 8 }) {
           cx={size / 2}
           cy={size / 2}
           r={radius}
-          stroke="#2a2a2a"
+          stroke={colors.border}
           strokeWidth={strokeWidth}
           fill="none"
         />
@@ -48,7 +47,7 @@ export default function XpProgressRing({ xp, size = 84, strokeWidth = 8 }) {
           cx={size / 2}
           cy={size / 2}
           r={radius}
-          stroke="#ffd23f"
+          stroke={colors.orange}
           strokeWidth={strokeWidth}
           fill="none"
           strokeLinecap="round"
@@ -68,7 +67,7 @@ export default function XpProgressRing({ xp, size = 84, strokeWidth = 8 }) {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (colors) => StyleSheet.create({
   center: {
     position: "absolute",
     top: 0,
@@ -78,16 +77,14 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
   },
-
   levelLabel: {
-    color: "#aaa",
+    color: colors.textMuted,
     fontSize: 9,
     fontWeight: "700",
     letterSpacing: 1,
   },
-
   levelValue: {
-    color: "#fff",
+    color: colors.text,
     fontSize: 20,
     fontWeight: "800",
     marginTop: -2,

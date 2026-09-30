@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from "react";
+import React, { useMemo, useState, useCallback } from "react";
 import {
   View,
   Text,
@@ -11,7 +11,7 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import YoutubePlayer from "react-native-youtube-iframe";
 
-import { colors, radius } from "../theme";
+import { radius, useTheme } from "../theme";
 import BottomNavBar from "./BottomNavBar";
 import DuoButton from "./DuoButton";
 
@@ -25,6 +25,8 @@ export default function LessonScreen({
   onRanking,
   onProfile,
 }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const [playing, setPlaying] = useState(false);
 
   const getYouTubeVideoId = (url) => {
@@ -157,7 +159,7 @@ export default function LessonScreen({
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (colors) => StyleSheet.create({
   root: {
     flex: 1,
     backgroundColor: colors.screenBg,

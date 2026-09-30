@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   View,
   Text,
@@ -11,14 +11,43 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 
 import { fetchQuizByLessonId, submitQuiz } from "../services/api";
-import { colors, radius } from "../theme";
+import { radius, useTheme } from "../theme";
 import BottomNavBar from "./BottomNavBar";
 import DuoButton from "./DuoButton";
 
 const formatXpRate = (rate) =>
   Number.isInteger(rate) ? `${rate}` : rate.toFixed(1);
 
+/**
+ * Returns the correct option index if the API sent one, otherwise null.
+ *
+ * Accepts camelCase or snake_case, and numbers or numeric strings. It uses
+ * null checks (not truthiness) so a valid index of 0 is never treated as
+ * "missing". Returning null means "the server is hiding the answer key",
+ * and the UI falls back to a neutral selection state.
+ */
+const getCorrectIndex = (question) => {
+  const raw =
+    question?.correctAnswer ??
+    question?.correct_answer ??
+    question?.correctIndex ??
+    question?.correct_index;
+
+  if (raw === null || raw === undefined || raw === "") {
+    return null;
+  }
+
+  const index = Number(raw);
+  const optionCount = question?.options?.length ?? 0;
+
+  return Number.isInteger(index) && index >= 0 && index < optionCount
+    ? index
+    : null;
+};
+
 function NavBarWrapper({ children, onHome, onCourses, onRanking, onProfile }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   return (
     <View style={styles.root}>
       {children}
@@ -45,6 +74,8 @@ export default function QuizScreen({
   onRanking,
   onProfile,
 }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const [quiz, setQuiz] = useState(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
@@ -82,7 +113,7 @@ export default function QuizScreen({
     return (
       <NavBarWrapper {...navProps}>
         <View style={[styles.container, { justifyContent: "center" }]}>
-          <ActivityIndicator size="large" color={colors.green} />
+          <ActivityIndicator size="large" color={colors.correct} />
         </View>
       </NavBarWrapper>
     );
@@ -110,7 +141,7 @@ export default function QuizScreen({
     );
   }
 
-  if (!quiz) {
+  if (!quiz || !quiz.questions?.length) {
     return (
       <NavBarWrapper {...navProps}>
         <View style={styles.container}>
@@ -128,8 +159,15 @@ export default function QuizScreen({
   const xpPerCorrect = quiz.xpPerCorrect;
   const question = quiz.questions[currentQuestion];
 
+  // null => the API hides the answer key until submission.
+  const correctIndex = getCorrectIndex(question);
+  const revealsAnswers = correctIndex !== null;
+  const hasAnswered = selectedAnswer !== null;
+
   const handleAnswer = (index) => {
-    if (selectedAnswer !== null) {
+    // With an answer key, the first pick is final (instant feedback).
+    // Without one, the user can change their mind until they press Next.
+    if (revealsAnswers && hasAnswered) {
       return;
     }
 
@@ -202,7 +240,7 @@ export default function QuizScreen({
           <View
             style={[
               styles.resultBadge,
-              { backgroundColor: isPerfect ? colors.gold : colors.green },
+              { backgroundColor: isPerfect ? colors.gold : colors.correct },
             ]}
           >
             <Ionicons
@@ -248,9 +286,7 @@ export default function QuizScreen({
   }
 
   const progressPercent =
-    ((currentQuestion + (selectedAnswer !== null ? 1 : 0)) /
-      quiz.questions.length) *
-    100;
+    ((currentQuestion + (hasAnswered ? 1 : 0)) / quiz.questions.length) * 100;
 
   return (
     <NavBarWrapper {...navProps}>
@@ -290,21 +326,27 @@ export default function QuizScreen({
 
           {question.options.map((option, index) => {
             const isSelected = selectedAnswer === index;
-            const isCorrectOption = index === question.correctAnswer;
-            const hasAnswered = selectedAnswer !== null;
+            const isCorrectOption = revealsAnswers && index === correctIndex;
+
+            // Only judge right/wrong when the client actually knows the key.
+            const showCorrect = revealsAnswers && hasAnswered && isCorrectOption;
+            const showIncorrect =
+              revealsAnswers && hasAnswered && isSelected && !isCorrectOption;
+
+            // No key (or not judged): a picked option is simply "active".
+            const showNeutralSelected =
+              !revealsAnswers && isSelected && !showCorrect && !showIncorrect;
 
             const optionStyle = [
               styles.option,
-              hasAnswered && isCorrectOption && styles.correctOption,
-              hasAnswered &&
-                isSelected &&
-                !isCorrectOption &&
-                styles.incorrectOption,
+              showNeutralSelected && styles.selectedOption,
+              showCorrect && styles.correctOption,
+              showIncorrect && styles.incorrectOption,
             ];
 
             const optionTextStyle = [
               styles.optionText,
-              (isSelected || (hasAnswered && isCorrectOption)) &&
+              (showNeutralSelected || showCorrect || showIncorrect) &&
                 styles.selectedOptionText,
             ];
 
@@ -313,21 +355,37 @@ export default function QuizScreen({
                 key={index}
                 style={optionStyle}
                 onPress={() => handleAnswer(index)}
-                disabled={hasAnswered}
+                disabled={revealsAnswers && hasAnswered}
+                accessibilityRole="button"
+                accessibilityState={{ selected: isSelected }}
               >
-                <View style={styles.optionLetter}>
-                  <Text style={styles.optionLetterText}>
+                <View
+                  style={[
+                    styles.optionLetter,
+                    showNeutralSelected && styles.optionLetterSelected,
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.optionLetterText,
+                      showNeutralSelected && styles.optionLetterTextSelected,
+                    ]}
+                  >
                     {String.fromCharCode(65 + index)}
                   </Text>
                 </View>
 
                 <Text style={optionTextStyle}>{option}</Text>
 
-                {hasAnswered && isCorrectOption && (
-                  <Ionicons name="checkmark-circle" size={22} color={colors.green} />
+                {showCorrect && (
+                  <Ionicons
+                    name="checkmark-circle"
+                    size={22}
+                    color={colors.correct}
+                  />
                 )}
 
-                {hasAnswered && isSelected && !isCorrectOption && (
+                {showIncorrect && (
                   <Ionicons name="close-circle" size={22} color={colors.red} />
                 )}
               </TouchableOpacity>
@@ -338,11 +396,13 @@ export default function QuizScreen({
         <DuoButton
           label={
             currentQuestion === quiz.questions.length - 1
-              ? "Finish Quiz"
+              ? submitting
+                ? "Submitting..."
+                : "Finish Quiz"
               : "Next"
           }
           variant="primary"
-          disabled={selectedAnswer === null}
+          disabled={selectedAnswer === null || submitting}
           onPress={handleNext}
           style={styles.mainButton}
         />
@@ -351,7 +411,7 @@ export default function QuizScreen({
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (colors) => StyleSheet.create({
   root: {
     flex: 1,
     backgroundColor: colors.screenBg,
@@ -418,7 +478,7 @@ const styles = StyleSheet.create({
   progressFill: {
     height: "100%",
     borderRadius: radius.full,
-    backgroundColor: colors.green,
+    backgroundColor: colors.correct,
   },
 
   questionCard: {
@@ -447,9 +507,15 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
 
+  // Neutral "picked" state, used when the answer key is hidden.
+  selectedOption: {
+    backgroundColor: colors.blueLight,
+    borderColor: colors.blue,
+  },
+
   correctOption: {
-    backgroundColor: colors.greenBg,
-    borderColor: colors.green,
+    backgroundColor: colors.correctBg,
+    borderColor: colors.correct,
   },
 
   incorrectOption: {
@@ -467,10 +533,18 @@ const styles = StyleSheet.create({
     marginRight: 12,
   },
 
+  optionLetterSelected: {
+    backgroundColor: colors.blue,
+  },
+
   optionLetterText: {
     fontSize: 12,
     fontWeight: "800",
     color: colors.textMuted,
+  },
+
+  optionLetterTextSelected: {
+    color: "#fff",
   },
 
   optionText: {

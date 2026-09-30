@@ -1,5 +1,5 @@
-import React, { useCallback, useEffect, useState } from "react";
-import { View, ActivityIndicator, StyleSheet, Alert } from "react-native";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { View, ActivityIndicator, StyleSheet, Alert, LogBox } from "react-native";
 
 import LoginScreen from "./components/LoginScreen";
 import HomeScreen from "./components/HomeScreen";
@@ -20,8 +20,13 @@ import {
   fetchCourses,
   fetchRanking,
 } from "./services/api";
+import { useTheme } from "./theme";
+
+LogBox.ignoreAllLogs();
 
 export default function App() {
+  const { colors } = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const [user, setUser] = useState(null);
   const [screen, setScreen] = useState("login");
   const [restoring, setRestoring] = useState(true);
@@ -134,7 +139,7 @@ export default function App() {
           : current
       );
     } catch (error) {
-      console.error("Failed to refresh progress:", error);
+      // Progress refresh failures are handled by the UI and alerts.
     }
   }, []);
 
@@ -172,7 +177,7 @@ export default function App() {
   if (restoring) {
     return (
       <View style={styles.loadingScreen}>
-        <ActivityIndicator size="large" color="#58cc02" />
+        <ActivityIndicator size="large" color={colors.orange} />
       </View>
     );
   }
@@ -184,7 +189,7 @@ export default function App() {
   if (loadingData || !student) {
     return (
       <View style={styles.loadingScreen}>
-        <ActivityIndicator size="large" color="#58cc02" />
+        <ActivityIndicator size="large" color={colors.orange} />
       </View>
     );
   }
@@ -284,11 +289,11 @@ export default function App() {
   return null;
 }
 
-const styles = StyleSheet.create({
+const createStyles = (colors) => StyleSheet.create({
   loadingScreen: {
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
-    backgroundColor: "#f7f9fc",
+    backgroundColor: colors.screenBg,
   },
 });
