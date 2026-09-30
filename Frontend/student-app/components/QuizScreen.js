@@ -1,9 +1,11 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  Animated,
+  Easing,
+  Pressable,
   View,
   Text,
   StyleSheet,
-  TouchableOpacity,
   ScrollView,
   ActivityIndicator,
   Alert,
@@ -17,6 +19,273 @@ import DuoButton from "./DuoButton";
 
 const formatXpRate = (rate) =>
   Number.isInteger(rate) ? `${rate}` : rate.toFixed(1);
+
+const playEntrance = (values, delay = 60) => {
+  values.forEach((value) => value.setValue(0));
+  Animated.stagger(
+    delay,
+    values.map((value) =>
+      Animated.timing(value, {
+        toValue: 1,
+        duration: 260,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      })
+    )
+  ).start();
+};
+
+function PressScale({ children, onPress, style, disabled = false }) {
+  const scale = useRef(new Animated.Value(1)).current;
+
+  const pressIn = () => {
+    if (!disabled) {
+      Animated.timing(scale, {
+        toValue: 0.97,
+        duration: 75,
+        useNativeDriver: true,
+      }).start();
+    }
+  };
+
+  const pressOut = () => {
+    Animated.spring(scale, {
+      toValue: 1,
+      speed: 24,
+      bounciness: 4,
+      useNativeDriver: true,
+    }).start();
+  };
+
+  return (
+    <Pressable
+      onPress={onPress}
+      onPressIn={pressIn}
+      onPressOut={pressOut}
+      disabled={disabled}
+      style={style}
+    >
+      <Animated.View style={{ transform: [{ scale }] }}>{children}</Animated.View>
+    </Pressable>
+  );
+}
+
+function AnswerOption({
+  index,
+  option,
+  isSelected,
+  showNeutralSelected,
+  showCorrect,
+  showIncorrect,
+  disabled,
+  onPress,
+  styles,
+  colors,
+}) {
+  const pressScale = useRef(new Animated.Value(1)).current;
+  const selection = useRef(new Animated.Value(0)).current;
+  const feedback = useRef(new Animated.Value(0)).current;
+  const shake = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    Animated.spring(selection, {
+      toValue: isSelected ? 1 : 0,
+      speed: 22,
+      bounciness: 5,
+      useNativeDriver: true,
+    }).start();
+  }, [isSelected, selection]);
+
+  useEffect(() => {
+    if (showCorrect || showIncorrect) {
+      feedback.setValue(0);
+      Animated.spring(feedback, {
+        toValue: 1,
+        speed: 20,
+        bounciness: 8,
+        useNativeDriver: true,
+      }).start();
+    }
+
+    if (showIncorrect) {
+      shake.setValue(0);
+      Animated.sequence([
+        Animated.timing(shake, { toValue: 1, duration: 35, useNativeDriver: true }),
+        Animated.timing(shake, { toValue: -1, duration: 55, useNativeDriver: true }),
+        Animated.timing(shake, { toValue: 0.55, duration: 45, useNativeDriver: true }),
+        Animated.timing(shake, { toValue: 0, duration: 45, useNativeDriver: true }),
+      ]).start();
+    }
+  }, [feedback, shake, showCorrect, showIncorrect]);
+
+  const selectedScale = selection.interpolate({
+    inputRange: [0, 1],
+    outputRange: [1, 1.025],
+  });
+  const shakeX = shake.interpolate({
+    inputRange: [-1, 1],
+    outputRange: [-4, 4],
+  });
+  const feedbackScale = feedback.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0.55, 1],
+  });
+  const optionStyle = [
+    styles.option,
+    showNeutralSelected && styles.selectedOption,
+    showCorrect && styles.correctOption,
+    showIncorrect && styles.incorrectOption,
+  ];
+  const optionTextStyle = [
+    styles.optionText,
+    (showNeutralSelected || showCorrect || showIncorrect) &&
+      styles.selectedOptionText,
+  ];
+
+  return (
+    <Pressable
+      onPress={onPress}
+      onPressIn={() =>
+        Animated.timing(pressScale, {
+          toValue: 0.97,
+          duration: 70,
+          useNativeDriver: true,
+        }).start()
+      }
+      onPressOut={() =>
+        Animated.spring(pressScale, {
+          toValue: 1,
+          speed: 24,
+          bounciness: 4,
+          useNativeDriver: true,
+        }).start()
+      }
+      disabled={disabled}
+      accessibilityRole="button"
+      accessibilityState={{ selected: isSelected, disabled }}
+    >
+      <Animated.View
+        style={[
+          optionStyle,
+          {
+            transform: [
+              { scale: Animated.multiply(pressScale, selectedScale) },
+              { translateX: shakeX },
+            ],
+          },
+        ]}
+      >
+        <Animated.View
+          style={[
+            styles.optionLetter,
+            showNeutralSelected && styles.optionLetterSelected,
+            {
+              transform: [
+                {
+                  scale: selection.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [1, 1.08],
+                  }),
+                },
+              ],
+            },
+          ]}
+        >
+          <Text
+            style={[
+              styles.optionLetterText,
+              showNeutralSelected && styles.optionLetterTextSelected,
+            ]}
+          >
+            {String.fromCharCode(65 + index)}
+          </Text>
+        </Animated.View>
+
+        <Text style={optionTextStyle}>{option}</Text>
+
+        {(showCorrect || showIncorrect) && (
+          <Animated.View
+            style={{ opacity: feedback, transform: [{ scale: feedbackScale }] }}
+          >
+            <Ionicons
+              name={showCorrect ? "checkmark-circle" : "close-circle"}
+              size={22}
+              color={showCorrect ? colors.correct : colors.red}
+            />
+          </Animated.View>
+        )}
+      </Animated.View>
+    </Pressable>
+  );
+}
+
+function CountUp({ value, style }) {
+  const animatedValue = useRef(new Animated.Value(0)).current;
+  const [count, setCount] = useState(0);
+
+  useEffect(() => {
+    animatedValue.setValue(0);
+    setCount(0);
+    const listenerId = animatedValue.addListener(({ value: nextValue }) => {
+      setCount(Math.round(nextValue));
+    });
+
+    Animated.timing(animatedValue, {
+      toValue: value,
+      duration: 680,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: false,
+    }).start();
+
+    return () => {
+      animatedValue.removeListener(listenerId);
+      animatedValue.stopAnimation();
+    };
+  }, [animatedValue, value]);
+
+  return <Text style={style}>{count}</Text>;
+}
+
+function QuestionCounter({ currentQuestion, totalQuestions, motion, styles }) {
+  const previousQuestion = useRef(currentQuestion);
+
+  useEffect(() => {
+    if (previousQuestion.current === currentQuestion) {
+      return;
+    }
+
+    previousQuestion.current = currentQuestion;
+    motion.setValue(0);
+    Animated.timing(motion, {
+      toValue: 1,
+      duration: 220,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start();
+  }, [currentQuestion, motion]);
+
+  return (
+    <Animated.View
+      style={{
+        opacity: motion,
+        transform: [
+          {
+            translateY: motion.interpolate({
+              inputRange: [0, 1],
+              outputRange: [7, 0],
+            }),
+          },
+        ],
+      }}
+    >
+      <Text style={styles.counterCaption}>QUESTION</Text>
+      <View style={styles.counterRow}>
+        <Text style={styles.counterNumber}>{currentQuestion + 1}</Text>
+        <Text style={styles.counterTotal}>/ {totalQuestions}</Text>
+      </View>
+    </Animated.View>
+  );
+}
 
 /**
  * Returns the correct option index if the API sent one, otherwise null.
@@ -88,8 +357,122 @@ export default function QuizScreen({
   const [xpEarned, setXpEarned] = useState(0);
   const [nextXpPerCorrect, setNextXpPerCorrect] = useState(0);
   const [submitting, setSubmitting] = useState(false);
+  const [isTransitioning, setIsTransitioning] = useState(false);
+
+  const totalQuestions = quiz?.questions?.length ?? 0;
+  const question = quiz?.questions?.[currentQuestion];
+  const correctIndex = getCorrectIndex(question);
+  const revealsAnswers = correctIndex !== null;
+  const hasAnswered = selectedAnswer !== null;
+  const progressPercent = totalQuestions
+    ? ((currentQuestion + (hasAnswered ? 1 : 0)) / totalQuestions) * 100
+    : 0;
+
+  const headerEntrance = useRef(new Animated.Value(0)).current;
+  const progressEntrance = useRef(new Animated.Value(0)).current;
+  const questionEntrance = useRef(new Animated.Value(0)).current;
+  const actionEntrance = useRef(new Animated.Value(0)).current;
+  const questionMotion = useRef(new Animated.Value(1)).current;
+  const progressMotion = useRef(new Animated.Value(0)).current;
+  const counterMotion = useRef(new Animated.Value(1)).current;
+  const xpMotion = useRef(new Animated.Value(1)).current;
+  const resultBadgeMotion = useRef(new Animated.Value(0)).current;
+  const resultTitleMotion = useRef(new Animated.Value(0)).current;
+  const resultScoreMotion = useRef(new Animated.Value(0)).current;
+  const resultXpMotion = useRef(new Animated.Value(0)).current;
+  const resultActionsMotion = useRef(new Animated.Value(0)).current;
+  const resultExitMotion = useRef(new Animated.Value(1)).current;
+  const entrancePlayedForQuiz = useRef(false);
+  const transitionLock = useRef(false);
 
   const navProps = { onHome, onCourses, onRanking, onProfile };
+
+  useEffect(() => {
+    Animated.timing(progressMotion, {
+      toValue: progressPercent / 100,
+      duration: 380,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: false,
+    }).start();
+  }, [progressMotion, progressPercent]);
+
+  useEffect(() => {
+    if (loading || finished || !quiz || entrancePlayedForQuiz.current) {
+      return;
+    }
+
+    entrancePlayedForQuiz.current = true;
+    playEntrance(
+      [headerEntrance, progressEntrance, questionEntrance, actionEntrance],
+      65
+    );
+  }, [
+    actionEntrance,
+    finished,
+    headerEntrance,
+    loading,
+    progressEntrance,
+    questionEntrance,
+    quiz,
+  ]);
+
+  useEffect(() => {
+    if (!finished) {
+      return;
+    }
+
+    resultExitMotion.setValue(1);
+    playEntrance(
+      [
+        resultBadgeMotion,
+        resultTitleMotion,
+        resultScoreMotion,
+        resultXpMotion,
+        resultActionsMotion,
+      ],
+      75
+    );
+
+    if (quiz && score === quiz.questions.length) {
+      resultBadgeMotion.setValue(0);
+      Animated.spring(resultBadgeMotion, {
+        toValue: 1,
+        speed: 16,
+        bounciness: 11,
+        useNativeDriver: true,
+      }).start();
+    }
+  }, [
+    finished,
+    quiz,
+    resultActionsMotion,
+    resultBadgeMotion,
+    resultExitMotion,
+    resultScoreMotion,
+    resultTitleMotion,
+    resultXpMotion,
+    score,
+  ]);
+
+  useEffect(() => {
+    if (!hasAnswered) {
+      return;
+    }
+
+    Animated.sequence([
+      Animated.timing(xpMotion, {
+        toValue: 1.08,
+        duration: 100,
+        useNativeDriver: true,
+      }),
+      Animated.spring(xpMotion, {
+        toValue: 1,
+        speed: 20,
+        bounciness: 5,
+        useNativeDriver: true,
+      }),
+    ]).start();
+  }, [hasAnswered, xpMotion]);
 
   // Fetch the quiz from the server. The server also tells us which attempt
   // this is and what a correct answer is worth, so nothing is tracked here.
@@ -133,9 +516,9 @@ export default function QuizScreen({
             style={styles.mainButton}
           />
 
-          <TouchableOpacity onPress={onBack}>
+          <PressScale onPress={onBack} style={styles.backPressable}>
             <Text style={styles.backButton}>← Back to Lesson</Text>
-          </TouchableOpacity>
+          </PressScale>
         </View>
       </NavBarWrapper>
     );
@@ -147,27 +530,18 @@ export default function QuizScreen({
         <View style={styles.container}>
           <Text style={styles.title}>Quiz coming soon</Text>
 
-          <TouchableOpacity onPress={onBack}>
+          <PressScale onPress={onBack} style={styles.backPressable}>
             <Text style={styles.backButton}>← Back to Lesson</Text>
-          </TouchableOpacity>
+          </PressScale>
         </View>
       </NavBarWrapper>
     );
   }
 
-  const attemptNumber = quiz.attemptNumber;
-  const xpPerCorrect = quiz.xpPerCorrect;
-  const question = quiz.questions[currentQuestion];
-
-  // null => the API hides the answer key until submission.
-  const correctIndex = getCorrectIndex(question);
-  const revealsAnswers = correctIndex !== null;
-  const hasAnswered = selectedAnswer !== null;
-
   const handleAnswer = (index) => {
     // With an answer key, the first pick is final (instant feedback).
     // Without one, the user can change their mind until they press Next.
-    if (revealsAnswers && hasAnswered) {
+    if ((revealsAnswers && hasAnswered) || transitionLock.current) {
       return;
     }
 
@@ -175,7 +549,7 @@ export default function QuizScreen({
   };
 
   const handleNext = async () => {
-    if (selectedAnswer === null || submitting) {
+    if (selectedAnswer === null || submitting || transitionLock.current) {
       return;
     }
 
@@ -183,9 +557,38 @@ export default function QuizScreen({
     const isLastQuestion = currentQuestion === quiz.questions.length - 1;
 
     if (!isLastQuestion) {
-      setChosen(updatedChosen);
-      setCurrentQuestion(currentQuestion + 1);
-      setSelectedAnswer(null);
+      transitionLock.current = true;
+      setIsTransitioning(true);
+      Animated.timing(questionMotion, {
+        toValue: 0,
+        duration: 145,
+        easing: Easing.in(Easing.cubic),
+        useNativeDriver: true,
+      }).start(({ finished: didExit }) => {
+        if (!didExit) {
+          transitionLock.current = false;
+          setIsTransitioning(false);
+          return;
+        }
+
+        setChosen(updatedChosen);
+        setCurrentQuestion(currentQuestion + 1);
+        setSelectedAnswer(null);
+        questionMotion.setValue(0);
+        requestAnimationFrame(() => {
+          Animated.timing(questionMotion, {
+            toValue: 1,
+            duration: 220,
+            easing: Easing.out(Easing.cubic),
+            useNativeDriver: true,
+          }).start(({ finished: didEnter }) => {
+            if (didEnter) {
+              transitionLock.current = false;
+              setIsTransitioning(false);
+            }
+          });
+        });
+      });
       return;
     }
 
@@ -217,17 +620,29 @@ export default function QuizScreen({
   };
 
   const handleTryAgain = () => {
-    setCurrentQuestion(0);
-    setSelectedAnswer(null);
-    setChosen({});
-    setScore(0);
-    setXpEarned(0);
-    setFinished(false);
-    loadQuiz();
+    Animated.timing(resultExitMotion, {
+      toValue: 0,
+      duration: 170,
+      easing: Easing.in(Easing.cubic),
+      useNativeDriver: true,
+    }).start(({ finished: didExit }) => {
+      if (!didExit) {
+        return;
+      }
+
+      setCurrentQuestion(0);
+      setSelectedAnswer(null);
+      setChosen({});
+      setScore(0);
+      setXpEarned(0);
+      setFinished(false);
+      entrancePlayedForQuiz.current = false;
+      progressMotion.setValue(0);
+      loadQuiz();
+    });
   };
 
   if (finished) {
-    const totalQuestions = quiz.questions.length;
     const nextRate = nextXpPerCorrect;
     const isPerfect = score === totalQuestions;
 
@@ -237,56 +652,152 @@ export default function QuizScreen({
           style={styles.container}
           contentContainerStyle={styles.scrollContent}
         >
-          <View
+          <Animated.View
             style={[
-              styles.resultBadge,
-              { backgroundColor: isPerfect ? colors.gold : colors.correct },
+              styles.resultContent,
+              {
+                opacity: resultExitMotion,
+                transform: [
+                  {
+                    translateY: resultExitMotion.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [14, 0],
+                    }),
+                  },
+                ],
+              },
             ]}
           >
-            <Ionicons
-              name={isPerfect ? "trophy" : "checkmark-circle"}
-              size={44}
-              color="#fff"
-            />
-          </View>
+            <Animated.View
+              style={[
+                styles.resultBadge,
+                { backgroundColor: isPerfect ? colors.gold : colors.correct },
+                {
+                  opacity: resultBadgeMotion,
+                  transform: [
+                    {
+                      scale: resultBadgeMotion.interpolate({
+                        inputRange: [0, 1],
+                        outputRange: [0.72, isPerfect ? 1.08 : 1],
+                      }),
+                    },
+                  ],
+                  shadowColor: isPerfect ? colors.gold : colors.correct,
+                  shadowOpacity: isPerfect ? 0.28 : 0.12,
+                },
+              ]}
+            >
+              <Ionicons
+                name={isPerfect ? "trophy" : "checkmark-circle"}
+                size={44}
+                color="#fff"
+              />
+            </Animated.View>
 
-          <Text style={styles.resultTitle}>Quiz Complete!</Text>
+            <Animated.View
+              style={{
+                opacity: resultTitleMotion,
+                transform: [
+                  {
+                    translateY: resultTitleMotion.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [9, 0],
+                    }),
+                  },
+                ],
+              }}
+            >
+              <Text style={styles.resultTitle}>Quiz Complete!</Text>
+            </Animated.View>
 
-          <Text style={styles.score}>
-            {score}/{totalQuestions}
-          </Text>
+            <Animated.View
+              style={[
+                styles.resultScoreRow,
+                {
+                  opacity: resultScoreMotion,
+                  transform: [
+                    {
+                      translateY: resultScoreMotion.interpolate({
+                        inputRange: [0, 1],
+                        outputRange: [10, 0],
+                      }),
+                    },
+                  ],
+                },
+              ]}
+            >
+              <CountUp value={score} style={styles.score} />
+              <Text style={styles.scoreTotal}>/ {totalQuestions}</Text>
+            </Animated.View>
 
-          <View style={styles.xpPill}>
-            <Ionicons name="flash" size={16} color={colors.blueDark} />
-            <Text style={styles.resultText}>You earned {xpEarned} XP</Text>
-          </View>
+            <Animated.View
+              style={[
+                styles.xpPill,
+                {
+                  opacity: resultXpMotion,
+                  transform: [
+                    {
+                      translateY: resultXpMotion.interpolate({
+                        inputRange: [0, 1],
+                        outputRange: [9, 0],
+                      }),
+                    },
+                  ],
+                },
+              ]}
+            >
+              <Ionicons name="flash" size={17} color={colors.orange} />
+              <Text style={styles.resultText}>You earned </Text>
+              <CountUp value={xpEarned} style={styles.resultText} />
+              <Text style={styles.resultText}> XP</Text>
+            </Animated.View>
 
-          <Text style={styles.resultSubtext}>
-            {isPerfect
-              ? "Perfect score!"
-              : "Nice work — review and try again anytime."}
-          </Text>
+            <Text style={styles.resultSubtext}>
+              {isPerfect
+                ? "Perfect score!"
+                : "Nice work — review and try again anytime."}
+            </Text>
 
-          <DuoButton
-            label="Back to Lesson"
-            variant="primary"
-            onPress={onBack}
-            style={styles.mainButton}
-          />
+            <Animated.View
+              style={{
+                opacity: resultActionsMotion,
+                transform: [
+                  {
+                    translateY: resultActionsMotion.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [8, 0],
+                    }),
+                  },
+                ],
+              }}
+            >
+              <DuoButton
+                label="Back to Lesson"
+                variant="primary"
+                onPress={onBack}
+                style={styles.mainButton}
+              />
 
-          <DuoButton
-            label={`Try Again · ${formatXpRate(nextRate)} XP each`}
-            variant="outline"
-            onPress={handleTryAgain}
-            style={styles.mainButton}
-          />
+              <DuoButton
+                label={`Try Again · ${formatXpRate(nextRate)} XP each`}
+                variant="outline"
+                onPress={handleTryAgain}
+                style={styles.mainButton}
+              />
+            </Animated.View>
+          </Animated.View>
         </ScrollView>
       </NavBarWrapper>
     );
   }
 
-  const progressPercent =
-    ((currentQuestion + (hasAnswered ? 1 : 0)) / quiz.questions.length) * 100;
+  const attemptNumber = quiz.attemptNumber;
+  const xpPerCorrect = quiz.xpPerCorrect;
+  const questionTranslate = questionMotion.interpolate({
+    inputRange: [0, 1],
+    outputRange: [-18, 0],
+  });
+  const questionOpacity = questionMotion;
 
   return (
     <NavBarWrapper {...navProps}>
@@ -294,321 +805,469 @@ export default function QuizScreen({
         style={styles.container}
         contentContainerStyle={styles.scrollContent}
       >
-        <TouchableOpacity onPress={onBack}>
+        <PressScale onPress={onBack} style={styles.backPressable}>
           <Text style={styles.backButton}>← Lesson</Text>
-        </TouchableOpacity>
+        </PressScale>
 
-        <View style={styles.headerRow}>
-          <Text style={styles.title}>Quick Quiz</Text>
+        <Animated.View
+          style={{
+            opacity: headerEntrance,
+            transform: [
+              {
+                translateY: headerEntrance.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: [8, 0],
+                }),
+              },
+            ],
+          }}
+        >
+          <View style={styles.headerRow}>
+            <Text style={styles.title}>Quick Quiz</Text>
 
-          {attemptNumber > 1 && (
-            <View style={styles.attemptBadge}>
-              <Text style={styles.attemptBadgeText}>
-                Attempt {attemptNumber}
-              </Text>
-            </View>
-          )}
-        </View>
+            {attemptNumber > 1 && (
+              <View style={styles.attemptBadge}>
+                <Text style={styles.attemptBadgeText}>
+                  Attempt {attemptNumber}
+                </Text>
+              </View>
+            )}
+          </View>
+        </Animated.View>
 
-        <Text style={styles.progress}>
-          Question {currentQuestion + 1} of {quiz.questions.length} ·{" "}
-          {formatXpRate(xpPerCorrect)} XP each
-        </Text>
-
-        <View style={styles.progressTrack}>
-          <View
-            style={[styles.progressFill, { width: `${progressPercent}%` }]}
+        <Animated.View
+          style={[
+            styles.progressMeta,
+            {
+              opacity: progressEntrance,
+              transform: [
+                {
+                  translateY: progressEntrance.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [8, 0],
+                  }),
+                },
+              ],
+            },
+          ]}
+        >
+          <QuestionCounter
+            currentQuestion={currentQuestion}
+            totalQuestions={totalQuestions}
+            motion={counterMotion}
+            styles={styles}
           />
-        </View>
+          <Animated.View
+            style={[styles.xpRatePill, { transform: [{ scale: xpMotion }] }]}
+          >
+            <Ionicons name="flash" size={15} color={colors.orange} />
+            <Text style={styles.xpRateText}>
+              {formatXpRate(xpPerCorrect)} XP each
+            </Text>
+          </Animated.View>
+        </Animated.View>
 
-        <View style={styles.questionCard}>
-          <Text style={styles.question}>{question.question}</Text>
+        <Animated.View
+          style={{
+            opacity: progressEntrance,
+            transform: [
+              {
+                translateY: progressEntrance.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: [6, 0],
+                }),
+              },
+            ],
+          }}
+        >
+          <View style={styles.progressTrack}>
+            <Animated.View
+              style={[
+                styles.progressFill,
+                {
+                  width: progressMotion.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: ["0%", "100%"],
+                  }),
+                },
+              ]}
+            />
+          </View>
+        </Animated.View>
 
-          {question.options.map((option, index) => {
-            const isSelected = selectedAnswer === index;
-            const isCorrectOption = revealsAnswers && index === correctIndex;
+        <Animated.View
+          style={{
+            opacity: questionOpacity,
+            transform: [{ translateX: questionTranslate }],
+          }}
+        >
+          <Animated.View
+            style={{
+              opacity: questionEntrance,
+              transform: [
+                {
+                  translateY: questionEntrance.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [10, 0],
+                  }),
+                },
+                {
+                  scale: questionEntrance.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [0.985, 1],
+                  }),
+                },
+              ],
+            }}
+          >
+            <View style={styles.questionCard}>
+              <Text style={styles.question}>{question.question}</Text>
 
-            // Only judge right/wrong when the client actually knows the key.
-            const showCorrect = revealsAnswers && hasAnswered && isCorrectOption;
-            const showIncorrect =
-              revealsAnswers && hasAnswered && isSelected && !isCorrectOption;
+              {question.options.map((option, index) => {
+                const isSelected = selectedAnswer === index;
+                const isCorrectOption = revealsAnswers && index === correctIndex;
 
-            // No key (or not judged): a picked option is simply "active".
-            const showNeutralSelected =
-              !revealsAnswers && isSelected && !showCorrect && !showIncorrect;
+                // Only judge right/wrong when the client actually knows the key.
+                const showCorrect =
+                  revealsAnswers && hasAnswered && isCorrectOption;
+                const showIncorrect =
+                  revealsAnswers &&
+                  hasAnswered &&
+                  isSelected &&
+                  !isCorrectOption;
 
-            const optionStyle = [
-              styles.option,
-              showNeutralSelected && styles.selectedOption,
-              showCorrect && styles.correctOption,
-              showIncorrect && styles.incorrectOption,
-            ];
+                // No key (or not judged): a picked option is simply "active".
+                const showNeutralSelected =
+                  !revealsAnswers &&
+                  isSelected &&
+                  !showCorrect &&
+                  !showIncorrect;
 
-            const optionTextStyle = [
-              styles.optionText,
-              (showNeutralSelected || showCorrect || showIncorrect) &&
-                styles.selectedOptionText,
-            ];
-
-            return (
-              <TouchableOpacity
-                key={index}
-                style={optionStyle}
-                onPress={() => handleAnswer(index)}
-                disabled={revealsAnswers && hasAnswered}
-                accessibilityRole="button"
-                accessibilityState={{ selected: isSelected }}
-              >
-                <View
-                  style={[
-                    styles.optionLetter,
-                    showNeutralSelected && styles.optionLetterSelected,
-                  ]}
-                >
-                  <Text
-                    style={[
-                      styles.optionLetterText,
-                      showNeutralSelected && styles.optionLetterTextSelected,
-                    ]}
-                  >
-                    {String.fromCharCode(65 + index)}
-                  </Text>
-                </View>
-
-                <Text style={optionTextStyle}>{option}</Text>
-
-                {showCorrect && (
-                  <Ionicons
-                    name="checkmark-circle"
-                    size={22}
-                    color={colors.correct}
+                return (
+                  <AnswerOption
+                    key={index}
+                    index={index}
+                    option={option}
+                    isSelected={isSelected}
+                    showNeutralSelected={showNeutralSelected}
+                    showCorrect={showCorrect}
+                    showIncorrect={showIncorrect}
+                    disabled={
+                      (revealsAnswers && hasAnswered) || isTransitioning
+                    }
+                    onPress={() => handleAnswer(index)}
+                    styles={styles}
+                    colors={colors}
                   />
-                )}
+                );
+              })}
+            </View>
+          </Animated.View>
+        </Animated.View>
 
-                {showIncorrect && (
-                  <Ionicons name="close-circle" size={22} color={colors.red} />
-                )}
-              </TouchableOpacity>
-            );
-          })}
-        </View>
-
-        <DuoButton
-          label={
-            currentQuestion === quiz.questions.length - 1
-              ? submitting
-                ? "Submitting..."
-                : "Finish Quiz"
-              : "Next"
-          }
-          variant="primary"
-          disabled={selectedAnswer === null || submitting}
-          onPress={handleNext}
-          style={styles.mainButton}
-        />
+        <Animated.View
+          style={{
+            opacity: actionEntrance,
+            transform: [
+              {
+                translateY: actionEntrance.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: [10, 0],
+                }),
+              },
+            ],
+          }}
+        >
+          <DuoButton
+            label={
+              currentQuestion === quiz.questions.length - 1
+                ? submitting
+                  ? "Submitting..."
+                  : "Finish Quiz"
+                : "Next"
+            }
+            variant="primary"
+            disabled={
+              selectedAnswer === null || submitting || isTransitioning
+            }
+            onPress={handleNext}
+            style={styles.mainButton}
+          />
+        </Animated.View>
       </ScrollView>
     </NavBarWrapper>
   );
 }
 
-const createStyles = (colors) => StyleSheet.create({
-  root: {
-    flex: 1,
-    backgroundColor: colors.screenBg,
-  },
+const createStyles = (colors) =>
+  StyleSheet.create({
+    root: {
+      flex: 1,
+      backgroundColor: colors.screenBg,
+    },
 
-  container: {
-    flex: 1,
-    paddingHorizontal: 20,
-  },
+    container: {
+      flex: 1,
+      paddingHorizontal: 20,
+    },
 
-  scrollContent: {
-    paddingBottom: 110,
-  },
+    scrollContent: {
+      paddingBottom: 110,
+    },
 
-  backButton: {
-    marginTop: 40,
-    fontSize: 15,
-    fontWeight: "700",
-    color: colors.blue,
-  },
+    backPressable: {
+      alignSelf: "flex-start",
+      minHeight: 38,
+      justifyContent: "center",
+      marginTop: 30,
+    },
 
-  headerRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    marginTop: 20,
-  },
+    backButton: {
+      fontSize: 15,
+      fontWeight: "700",
+      color: colors.orangeDeep,
+    },
 
-  title: {
-    fontSize: 26,
-    fontWeight: "800",
-    color: colors.text,
-  },
+    headerRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      marginTop: 10,
+    },
 
-  attemptBadge: {
-    backgroundColor: colors.gold,
-    borderRadius: radius.full,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-  },
+    title: {
+      fontSize: 26,
+      fontWeight: "800",
+      color: colors.text,
+    },
 
-  attemptBadgeText: {
-    color: "#4a3900",
-    fontSize: 12,
-    fontWeight: "800",
-  },
+    attemptBadge: {
+      backgroundColor: colors.orangeLight,
+      borderRadius: radius.full,
+      paddingHorizontal: 12,
+      paddingVertical: 6,
+    },
 
-  progress: {
-    color: colors.textMuted,
-    marginTop: 10,
-    marginBottom: 8,
-    fontSize: 13,
-    fontWeight: "600",
-  },
+    attemptBadgeText: {
+      color: colors.orangeDeep,
+      fontSize: 12,
+      fontWeight: "800",
+    },
 
-  progressTrack: {
-    height: 12,
-    borderRadius: radius.full,
-    backgroundColor: colors.border,
-    overflow: "hidden",
-    marginBottom: 20,
-  },
+    progressMeta: {
+      flexDirection: "row",
+      justifyContent: "space-between",
+      alignItems: "center",
+      marginTop: 20,
+      marginBottom: 12,
+    },
 
-  progressFill: {
-    height: "100%",
-    borderRadius: radius.full,
-    backgroundColor: colors.correct,
-  },
+    counterCaption: {
+      color: colors.textMuted,
+      fontSize: 10,
+      fontWeight: "800",
+      letterSpacing: 0.8,
+    },
 
-  questionCard: {
-    backgroundColor: "#fff",
-    borderRadius: radius.lg,
-    padding: 20,
-    borderWidth: 2,
-    borderColor: colors.border,
-  },
+    counterRow: {
+      flexDirection: "row",
+      alignItems: "baseline",
+      marginTop: 1,
+    },
 
-  question: {
-    fontSize: 19,
-    fontWeight: "700",
-    lineHeight: 26,
-    marginBottom: 20,
-    color: colors.text,
-  },
+    counterNumber: {
+      color: colors.text,
+      fontSize: 24,
+      fontWeight: "800",
+      fontVariant: ["tabular-nums"],
+    },
 
-  option: {
-    flexDirection: "row",
-    alignItems: "center",
-    borderWidth: 2,
-    borderColor: colors.border,
-    borderRadius: radius.md,
-    padding: 14,
-    marginBottom: 12,
-  },
+    counterTotal: {
+      color: colors.textMuted,
+      fontSize: 14,
+      fontWeight: "700",
+      marginLeft: 4,
+    },
 
-  // Neutral "picked" state, used when the answer key is hidden.
-  selectedOption: {
-    backgroundColor: colors.blueLight,
-    borderColor: colors.blue,
-  },
+    xpRatePill: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 5,
+      backgroundColor: colors.orangeLight,
+      borderRadius: radius.full,
+      paddingHorizontal: 11,
+      paddingVertical: 7,
+    },
 
-  correctOption: {
-    backgroundColor: colors.correctBg,
-    borderColor: colors.correct,
-  },
+    xpRateText: {
+      color: colors.orangeDeep,
+      fontSize: 12,
+      fontWeight: "800",
+    },
 
-  incorrectOption: {
-    backgroundColor: colors.redLight,
-    borderColor: colors.red,
-  },
+    progressTrack: {
+      height: 10,
+      borderRadius: radius.full,
+      backgroundColor: colors.border,
+      overflow: "hidden",
+      marginBottom: 20,
+    },
 
-  optionLetter: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: colors.bgMuted,
-    justifyContent: "center",
-    alignItems: "center",
-    marginRight: 12,
-  },
+    progressFill: {
+      height: "100%",
+      borderRadius: radius.full,
+      backgroundColor: colors.orange,
+    },
 
-  optionLetterSelected: {
-    backgroundColor: colors.blue,
-  },
+    questionCard: {
+      backgroundColor: colors.card,
+      borderRadius: radius.lg,
+      padding: 20,
+      borderWidth: 2,
+      borderColor: colors.border,
+    },
 
-  optionLetterText: {
-    fontSize: 12,
-    fontWeight: "800",
-    color: colors.textMuted,
-  },
+    question: {
+      fontSize: 19,
+      fontWeight: "700",
+      lineHeight: 26,
+      marginBottom: 20,
+      color: colors.text,
+    },
 
-  optionLetterTextSelected: {
-    color: "#fff",
-  },
+    option: {
+      flexDirection: "row",
+      alignItems: "center",
+      borderWidth: 2,
+      borderColor: colors.border,
+      borderRadius: radius.md,
+      padding: 14,
+      marginBottom: 12,
+      backgroundColor: colors.card,
+    },
 
-  optionText: {
-    fontSize: 15,
-    flex: 1,
-    color: colors.text,
-  },
+    selectedOption: {
+      backgroundColor: colors.orangeLight,
+      borderColor: colors.orange,
+    },
 
-  selectedOptionText: {
-    fontWeight: "700",
-  },
+    correctOption: {
+      backgroundColor: colors.correctBg,
+      borderColor: colors.correct,
+    },
 
-  mainButton: {
-    marginTop: 20,
-  },
+    incorrectOption: {
+      backgroundColor: colors.redLight,
+      borderColor: colors.red,
+    },
 
-  resultBadge: {
-    width: 88,
-    height: 88,
-    borderRadius: 44,
-    justifyContent: "center",
-    alignItems: "center",
-    alignSelf: "center",
-    marginTop: 60,
-  },
+    optionLetter: {
+      width: 28,
+      height: 28,
+      borderRadius: 14,
+      backgroundColor: colors.bgMuted,
+      justifyContent: "center",
+      alignItems: "center",
+      marginRight: 12,
+    },
 
-  resultTitle: {
-    fontSize: 24,
-    fontWeight: "800",
-    textAlign: "center",
-    marginTop: 16,
-    color: colors.text,
-  },
+    optionLetterSelected: {
+      backgroundColor: colors.orange,
+    },
 
-  score: {
-    fontSize: 48,
-    fontWeight: "800",
-    textAlign: "center",
-    marginTop: 16,
-    color: colors.text,
-  },
+    optionLetterText: {
+      fontSize: 12,
+      fontWeight: "800",
+      color: colors.textMuted,
+    },
 
-  xpPill: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    alignSelf: "center",
-    backgroundColor: colors.blueLight,
-    borderRadius: radius.full,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    marginTop: 14,
-  },
+    optionLetterTextSelected: {
+      color: "#fff",
+    },
 
-  resultText: {
-    fontSize: 15,
-    fontWeight: "700",
-    color: colors.blueDark,
-  },
+    optionText: {
+      fontSize: 15,
+      flex: 1,
+      color: colors.text,
+    },
 
-  resultSubtext: {
-    fontSize: 14,
-    color: colors.textMuted,
-    textAlign: "center",
-    marginTop: 10,
-  },
-});
+    selectedOptionText: {
+      fontWeight: "700",
+    },
+
+    mainButton: {
+      marginTop: 20,
+    },
+
+    resultContent: {
+      alignItems: "stretch",
+    },
+
+    resultBadge: {
+      width: 88,
+      height: 88,
+      borderRadius: 44,
+      justifyContent: "center",
+      alignItems: "center",
+      alignSelf: "center",
+      marginTop: 60,
+      shadowOffset: { width: 0, height: 7 },
+      shadowRadius: 12,
+      elevation: 5,
+    },
+
+    resultTitle: {
+      fontSize: 24,
+      fontWeight: "800",
+      textAlign: "center",
+      marginTop: 16,
+      color: colors.text,
+    },
+
+    resultScoreRow: {
+      flexDirection: "row",
+      alignItems: "baseline",
+      justifyContent: "center",
+      marginTop: 12,
+    },
+
+    score: {
+      fontSize: 48,
+      fontWeight: "800",
+      textAlign: "center",
+      color: colors.text,
+      fontVariant: ["tabular-nums"],
+    },
+
+    scoreTotal: {
+      fontSize: 21,
+      fontWeight: "700",
+      color: colors.textMuted,
+      marginLeft: 5,
+    },
+
+    xpPill: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 2,
+      alignSelf: "center",
+      backgroundColor: colors.orangeLight,
+      borderRadius: radius.full,
+      paddingHorizontal: 14,
+      paddingVertical: 9,
+      marginTop: 14,
+    },
+
+    resultText: {
+      fontSize: 15,
+      fontWeight: "700",
+      color: colors.orangeDeep,
+    },
+
+    resultSubtext: {
+      fontSize: 14,
+      color: colors.textMuted,
+      textAlign: "center",
+      marginTop: 12,
+    },
+  });

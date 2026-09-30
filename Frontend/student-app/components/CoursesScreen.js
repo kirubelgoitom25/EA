@@ -1,9 +1,11 @@
-import React, { useMemo } from "react";
+import React, { useEffect, useMemo, useRef } from "react";
 import {
+  Animated,
+  Easing,
+  Pressable,
   View,
   Text,
   StyleSheet,
-  TouchableOpacity,
   ScrollView,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
@@ -25,6 +27,123 @@ const getCourseVisual = (title = "", colors) => {
   return { icon: "book", color: colors.orangeDeep, bg: colors.orangeLight };
 };
 
+function CourseCard({ course, index, onSelectCourse, colors, styles }) {
+  const entrance = useRef(new Animated.Value(0)).current;
+  const progress = useRef(new Animated.Value(0)).current;
+  const pressScale = useRef(new Animated.Value(1)).current;
+  const visual = getCourseVisual(course.title, colors);
+  const isDone = course.progress === 100;
+
+  useEffect(() => {
+    Animated.timing(entrance, {
+      toValue: 1,
+      duration: 280,
+      delay: index * 55,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start();
+  }, [entrance, index]);
+
+  useEffect(() => {
+    const progressValue = Math.max(0, Math.min(Number(course.progress) || 0, 100)) / 100;
+    Animated.timing(progress, {
+      toValue: progressValue,
+      duration: 520,
+      delay: 100 + index * 40,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: false,
+    }).start();
+  }, [course.progress, index, progress]);
+
+  const entranceScale = entrance.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0.985, 1],
+  });
+  const translateY = entrance.interpolate({
+    inputRange: [0, 1],
+    outputRange: [12, 0],
+  });
+  const progressWidth = progress.interpolate({
+    inputRange: [0, 1],
+    outputRange: ["0%", "100%"],
+  });
+
+  return (
+    <Pressable
+      onPress={() => onSelectCourse(course)}
+      onPressIn={() =>
+        Animated.timing(pressScale, {
+          toValue: 0.985,
+          duration: 75,
+          useNativeDriver: true,
+        }).start()
+      }
+      onPressOut={() =>
+        Animated.spring(pressScale, {
+          toValue: 1,
+          speed: 24,
+          bounciness: 4,
+          useNativeDriver: true,
+        }).start()
+      }
+      accessibilityRole="button"
+      accessibilityLabel={`${course.title}, ${course.progress}% complete, ${isDone ? "Review" : "Open"}`}
+    >
+      <Animated.View
+        style={[
+          styles.courseCard,
+          {
+            opacity: entrance,
+            transform: [
+              { translateY },
+              { scale: Animated.multiply(pressScale, entranceScale) },
+            ],
+          },
+        ]}
+      >
+        <View style={styles.courseTopRow}>
+          <View style={[styles.courseIcon, { backgroundColor: visual.bg }]}>
+            <Ionicons name={visual.icon} size={22} color={visual.color} />
+          </View>
+
+          <View style={styles.courseTextBlock}>
+            <Text style={styles.courseTitle}>{course.title}</Text>
+            <Text style={styles.description} numberOfLines={2}>
+              {course.description}
+            </Text>
+          </View>
+        </View>
+
+        <View style={styles.metaRow}>
+          <Text style={styles.lessons}>
+            {course.completedLessons} / {course.totalLessons} lessons
+          </Text>
+          {isDone && <Text style={styles.completedTag}>Completed</Text>}
+        </View>
+
+        <View style={styles.progressBackground}>
+          <Animated.View
+            style={[
+              styles.progressBar,
+              { width: progressWidth },
+              isDone && { backgroundColor: colors.yellow },
+            ]}
+          />
+        </View>
+
+        <View style={styles.bottomRow}>
+          <Text style={styles.progress}>{course.progress}% complete</Text>
+
+          <View style={styles.openPill}>
+            <Text style={styles.openCourse}>{isDone ? "Review" : "Open"}</Text>
+            <Ionicons name="arrow-forward" size={14} color={colors.orangeDeep} />
+          </View>
+        </View>
+      </Animated.View>
+    </Pressable>
+  );
+}
+
 export default function CoursesScreen({
   courses,
   onSelectCourse,
@@ -36,65 +155,75 @@ export default function CoursesScreen({
 }) {
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
+  const headerEntrance = useRef(new Animated.Value(0)).current;
+  const backScale = useRef(new Animated.Value(1)).current;
+
+  useEffect(() => {
+    Animated.timing(headerEntrance, {
+      toValue: 1,
+      duration: 300,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start();
+  }, [headerEntrance]);
+
   return (
     <View style={styles.root}>
       <ScrollView style={styles.container} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-        <TouchableOpacity onPress={onBack} style={styles.backButton}>
-          <Ionicons name="chevron-back" size={20} color={colors.text} />
-          <Text style={styles.backLabel}>Home</Text>
-        </TouchableOpacity>
-
-        <Text style={styles.eyebrow}>Your learning</Text>
-        <Text style={styles.title}>My Courses</Text>
-
-        {courses.map((course) => {
-          const visual = getCourseVisual(course.title, colors);
-          const isDone = course.progress === 100;
-
-          return (
-            <TouchableOpacity
-              key={course.id}
-              style={styles.courseCard}
-              activeOpacity={0.85}
-              onPress={() => onSelectCourse(course)}
+        <Animated.View
+          style={{
+            opacity: headerEntrance,
+            transform: [
+              {
+                translateY: headerEntrance.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: [9, 0],
+                }),
+              },
+            ],
+          }}
+        >
+          <Pressable
+            onPress={onBack}
+            onPressIn={() =>
+              Animated.timing(backScale, {
+                toValue: 0.96,
+                duration: 75,
+                useNativeDriver: true,
+              }).start()
+            }
+            onPressOut={() =>
+              Animated.spring(backScale, {
+                toValue: 1,
+                speed: 24,
+                bounciness: 4,
+                useNativeDriver: true,
+              }).start()
+            }
+            accessibilityRole="button"
+          >
+            <Animated.View
+              style={[styles.backButton, { transform: [{ scale: backScale }] }]}
             >
-              <View style={styles.courseTopRow}>
-                <View style={[styles.courseIcon, { backgroundColor: visual.bg }]}>
-                  <Ionicons name={visual.icon} size={22} color={visual.color} />
-                </View>
+              <Ionicons name="chevron-back" size={20} color={colors.text} />
+              <Text style={styles.backLabel}>Home</Text>
+            </Animated.View>
+          </Pressable>
 
-                <View style={styles.courseTextBlock}>
-                  <Text style={styles.courseTitle}>{course.title}</Text>
-                  <Text style={styles.description} numberOfLines={2}>{course.description}</Text>
-                </View>
-              </View>
+          <Text style={styles.eyebrow}>Your learning</Text>
+          <Text style={styles.title}>My Courses</Text>
+        </Animated.View>
 
-              <View style={styles.metaRow}>
-                <Text style={styles.lessons}>{course.completedLessons} / {course.totalLessons} lessons</Text>
-                {isDone && <Text style={styles.completedTag}>Completed</Text>}
-              </View>
-
-              <View style={styles.progressBackground}>
-                <View
-                  style={[
-                    styles.progressBar,
-                    { width: `${course.progress}%` },
-                    isDone && { backgroundColor: colors.yellow },
-                  ]}
-                />
-              </View>
-
-              <View style={styles.bottomRow}>
-                <Text style={styles.progress}>{course.progress}% complete</Text>
-
-                <View style={styles.openPill}>
-                  <Text style={styles.openCourse}>{isDone ? "Review" : "Open"}</Text>
-                  <Ionicons name="arrow-forward" size={14} color={colors.orangeDeep} />
-                </View>
-              </View>
-            </TouchableOpacity>
-          );
-        })}
+        {courses.map((course, index) => (
+          <CourseCard
+            key={course.id}
+            course={course}
+            index={index}
+            onSelectCourse={onSelectCourse}
+            colors={colors}
+            styles={styles}
+          />
+        ))}
       </ScrollView>
 
       <BottomNavBar

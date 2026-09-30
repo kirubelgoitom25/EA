@@ -4,22 +4,21 @@
     "slug": "student-app",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/icon.png",
+    "icon": "./assets/icon.jpg",
     "userInterfaceStyle": "light",
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.anonymous.studentapp"
     },
     "android": {
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
-        "foregroundImage": "./assets/icon.png",
-        "backgroundImage": "./assets/icon.png",
-        "monochromeImage": "./assets/icon.png"
+        "foregroundImage": "./assets/icon.jpg"
       },
       "package": "com.anonymous.studentapp"
     },
     "web": {
-      "favicon": "./assets/favicon.png"
+      "favicon": "./assets/favicon.jpg"
     },
     "plugins": [
       "expo-sqlite",
