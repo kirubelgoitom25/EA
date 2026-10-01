@@ -238,6 +238,9 @@ export async function fetchPracticeByLessonId(lessonId) {
         // The screen expects: a number (the right option's index) for
         // "choose", and the correct text for "fill".
         answer: item.type === "choose" ? item.correct_index : item.answer,
+         
+        explanation: item.explanation, 
+     
       })),
     };
   } catch (error) {

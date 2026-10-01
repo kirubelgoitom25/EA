@@ -1,5 +1,13 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
+  Animated,
+  Easing,
   View,
   Text,
   StyleSheet,
@@ -30,6 +38,43 @@ const normalize = (value) => (value ?? "").toString().trim().toLowerCase();
 
 const isChoose = (activity) => activity.type === "choose";
 
+// Returns the first field that actually has a value. Uses null checks (not
+// truthiness) so a valid answer of 0 is never treated as "missing".
+const pick = (obj, keys) => {
+  for (const key of keys) {
+    const value = obj?.[key];
+    if (value !== undefined && value !== null && value !== "") {
+      return value;
+    }
+  }
+  return null;
+};
+
+// Same idea as the quiz's getCorrectIndex: accept camelCase or snake_case,
+// and numbers or numeric strings, so the answer key and explanation are found
+// however the API names them.
+const normalizeActivity = (raw) => {
+  let answer = pick(raw, [
+    "answer",
+    "correctAnswer",
+    "correct_answer",
+    "correctIndex",
+    "correct_index",
+  ]);
+
+  if (raw.type === "choose" && typeof answer === "string" && /^\d+$/.test(answer)) {
+    answer = Number(answer);
+  }
+
+  const explanation = pick(raw, [
+    "explanation",
+    "explanationText",
+    "explanation_text",
+  ]);
+
+  return { ...raw, answer, explanation };
+};
+
 // Whether the client received an answer key for this activity.
 const hasAnswerKey = (activity) =>
   activity.answer !== undefined && activity.answer !== null;
@@ -41,6 +86,47 @@ const getAnswerLabel = (activity) => {
   }
   return activity.answer;
 };
+
+// Same look as the quiz explanation: muted box, info icon, soft entrance.
+function ExplanationBox({ text, styles, colors }) {
+  const motion = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    motion.setValue(0);
+    Animated.timing(motion, {
+      toValue: 1,
+      duration: 220,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start();
+  }, [motion, text]);
+
+  return (
+    <Animated.View
+      style={[
+        styles.explanationBox,
+        {
+          opacity: motion,
+          transform: [
+            {
+              translateY: motion.interpolate({
+                inputRange: [0, 1],
+                outputRange: [8, 0],
+              }),
+            },
+          ],
+        },
+      ]}
+    >
+      <Ionicons
+        name="information-circle"
+        size={18}
+        color={colors.textMuted}
+      />
+      <Text style={styles.explanationText}>{text}</Text>
+    </Animated.View>
+  );
+}
 
 function NavBarWrapper({ children, onHome, onCourses, onRanking, onProfile }) {
   const { colors } = useTheme();
@@ -148,7 +234,7 @@ export default function PracticeScreen({
     );
   }
 
-  const activities = practice.activities;
+  const activities = practice.activities.map(normalizeActivity);
   const total = activities.length;
   const activity = activities[currentIndex];
   const isLast = currentIndex === total - 1;
@@ -486,8 +572,13 @@ export default function PracticeScreen({
           )}
 
           {correct && <Text style={styles.correctText}>Correct!</Text>}
-          {checked && activity.explanation && (
-            <Text style={styles.explanationText}>{activity.explanation}</Text>
+
+          {checked && keyKnown && activity.explanation && (
+            <ExplanationBox
+              text={activity.explanation}
+              styles={styles}
+              colors={colors}
+            />
           )}
         </View>
 
@@ -574,7 +665,7 @@ const createStyles = (colors) =>
     },
 
     activityCard: {
-      backgroundColor: "#fff",
+      backgroundColor: colors.card,
       borderRadius: radius.lg,
       padding: 20,
       borderWidth: 2,
@@ -701,11 +792,22 @@ const createStyles = (colors) =>
       fontSize: 14,
       fontWeight: "800",
     },
+
+    explanationBox: {
+      flexDirection: "row",
+      alignItems: "flex-start",
+      gap: 8,
+      marginTop: 14,
+      padding: 12,
+      borderRadius: radius.md,
+      backgroundColor: colors.bgMuted,
+    },
+
     explanationText: {
-      color: colors.textMuted,
-      marginTop: 12,
+      flex: 1,
       fontSize: 13,
       lineHeight: 19,
+      color: colors.textMuted,
     },
 
     mainButton: {
