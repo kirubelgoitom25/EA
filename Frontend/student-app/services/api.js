@@ -28,7 +28,10 @@ async function request(path, options = {}) {
   try {
     response = await fetch(`${API_BASE_URL}${path}`, { ...options, headers });
   } catch (networkError) {
-    throw new ApiError("Can't reach the server. Check your connection and try again.", 0);
+    throw new ApiError(
+      "Can't reach the server. Check your connection and try again.",
+      0,
+    );
   }
 
   if (response.status === 401) {
@@ -39,7 +42,10 @@ async function request(path, options = {}) {
   const body = await response.json().catch(() => null);
 
   if (!response.ok) {
-    throw new ApiError(body?.detail || "Something went wrong.", response.status);
+    throw new ApiError(
+      body?.detail || "Something went wrong.",
+      response.status,
+    );
   }
 
   return body;
@@ -78,7 +84,9 @@ async function loadStudentUser() {
 
   if (me.role !== "student") {
     await supabase.auth.signOut();
-    throw new Error("This app is for students. Teachers should use the teacher dashboard.");
+    throw new Error(
+      "This app is for students. Teachers should use the teacher dashboard.",
+    );
   }
 
   return { id: me.id, name: me.name, email: me.email, role: me.role };
@@ -93,7 +101,9 @@ export async function loginUser(email, password) {
 
   if (error) {
     if (error.name === "AuthRetryableFetchError") {
-      throw new Error("Can't reach the server. Check your connection and try again.");
+      throw new Error(
+        "Can't reach the server. Check your connection and try again.",
+      );
     }
     throw new Error("Incorrect email or password.");
   }
@@ -126,7 +136,10 @@ export async function restoreSession() {
 // ---- Student, courses, ranking ---------------------------------------
 
 export async function fetchStudent() {
-  const [me, stats] = await Promise.all([request("/auth/me"), request("/me/stats")]);
+  const [me, stats] = await Promise.all([
+    request("/auth/me"),
+    request("/me/stats"),
+  ]);
 
   return {
     id: me.id,
@@ -171,6 +184,7 @@ export async function fetchQuizByLessonId(lessonId) {
         question: question.question,
         options: question.options,
         correctAnswer: question.correct_index,
+        explanation: question.explanation,
       })),
     };
   } catch (error) {

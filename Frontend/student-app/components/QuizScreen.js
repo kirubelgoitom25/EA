@@ -1,4 +1,10 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   Animated,
   Easing,
@@ -30,8 +36,8 @@ const playEntrance = (values, delay = 60) => {
         duration: 260,
         easing: Easing.out(Easing.cubic),
         useNativeDriver: true,
-      })
-    )
+      }),
+    ),
   ).start();
 };
 
@@ -65,7 +71,9 @@ function PressScale({ children, onPress, style, disabled = false }) {
       disabled={disabled}
       style={style}
     >
-      <Animated.View style={{ transform: [{ scale }] }}>{children}</Animated.View>
+      <Animated.View style={{ transform: [{ scale }] }}>
+        {children}
+      </Animated.View>
     </Pressable>
   );
 }
@@ -110,10 +118,26 @@ function AnswerOption({
     if (showIncorrect) {
       shake.setValue(0);
       Animated.sequence([
-        Animated.timing(shake, { toValue: 1, duration: 35, useNativeDriver: true }),
-        Animated.timing(shake, { toValue: -1, duration: 55, useNativeDriver: true }),
-        Animated.timing(shake, { toValue: 0.55, duration: 45, useNativeDriver: true }),
-        Animated.timing(shake, { toValue: 0, duration: 45, useNativeDriver: true }),
+        Animated.timing(shake, {
+          toValue: 1,
+          duration: 35,
+          useNativeDriver: true,
+        }),
+        Animated.timing(shake, {
+          toValue: -1,
+          duration: 55,
+          useNativeDriver: true,
+        }),
+        Animated.timing(shake, {
+          toValue: 0.55,
+          duration: 45,
+          useNativeDriver: true,
+        }),
+        Animated.timing(shake, {
+          toValue: 0,
+          duration: 45,
+          useNativeDriver: true,
+        }),
       ]).start();
     }
   }, [feedback, shake, showCorrect, showIncorrect]);
@@ -404,7 +428,7 @@ export default function QuizScreen({
     entrancePlayedForQuiz.current = true;
     playEntrance(
       [headerEntrance, progressEntrance, questionEntrance, actionEntrance],
-      65
+      65,
     );
   }, [
     actionEntrance,
@@ -430,7 +454,7 @@ export default function QuizScreen({
         resultXpMotion,
         resultActionsMotion,
       ],
-      75
+      75,
     );
 
     if (quiz && score === quiz.questions.length) {
@@ -600,7 +624,7 @@ export default function QuizScreen({
         quiz.questions.map((item) => ({
           questionId: item.id,
           selectedIndex: updatedChosen[item.id],
-        }))
+        })),
       );
 
       setChosen(updatedChosen);
@@ -922,10 +946,10 @@ export default function QuizScreen({
           >
             <View style={styles.questionCard}>
               <Text style={styles.question}>{question.question}</Text>
-
               {question.options.map((option, index) => {
                 const isSelected = selectedAnswer === index;
-                const isCorrectOption = revealsAnswers && index === correctIndex;
+                const isCorrectOption =
+                  revealsAnswers && index === correctIndex;
 
                 // Only judge right/wrong when the client actually knows the key.
                 const showCorrect =
@@ -961,6 +985,19 @@ export default function QuizScreen({
                   />
                 );
               })}
+              {hasAnswered && revealsAnswers && question.explanation && (
+                <View style={styles.explanationBox}>
+                  <Ionicons
+                    name="information-circle"
+                    size={18}
+                    color={colors.textMuted}
+                  />
+                  <Text style={styles.explanationText}>
+                    {question.explanation}
+                  </Text>
+                </View>
+              )}
+              
             </View>
           </Animated.View>
         </Animated.View>
@@ -987,9 +1024,7 @@ export default function QuizScreen({
                 : "Next"
             }
             variant="primary"
-            disabled={
-              selectedAnswer === null || submitting || isTransitioning
-            }
+            disabled={selectedAnswer === null || submitting || isTransitioning}
             onPress={handleNext}
             style={styles.mainButton}
           />
@@ -1193,6 +1228,22 @@ const createStyles = (colors) =>
 
     selectedOptionText: {
       fontWeight: "700",
+    },
+    explanationBox: {
+      flexDirection: "row",
+      alignItems: "flex-start",
+      gap: 8,
+      marginTop: 14,
+      padding: 12,
+      borderRadius: radius.md,
+      backgroundColor: colors.bgMuted,
+    },
+
+    explanationText: {
+      flex: 1,
+      fontSize: 13,
+      lineHeight: 19,
+      color: colors.textMuted,
     },
 
     mainButton: {

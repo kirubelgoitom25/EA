@@ -203,9 +203,9 @@ export default function PracticeScreen({
         lesson.id,
         activities.map((item) => ({
           itemId: item.id,
-          textAnswer: isChoose(item) ? null : answers[item.id] ?? "",
-          selectedIndex: isChoose(item) ? answers[item.id] ?? null : null,
-        }))
+          textAnswer: isChoose(item) ? null : (answers[item.id] ?? ""),
+          selectedIndex: isChoose(item) ? (answers[item.id] ?? null) : null,
+        })),
       );
 
       setServerResults({
@@ -322,10 +322,10 @@ export default function PracticeScreen({
   const primaryLabel = submitting
     ? "Submitting..."
     : !checked && keyKnown
-    ? "Check"
-    : isLast
-    ? "Finish Practice"
-    : "Next";
+      ? "Check"
+      : isLast
+        ? "Finish Practice"
+        : "Next";
 
   return (
     <NavBarWrapper {...navProps}>
@@ -486,6 +486,9 @@ export default function PracticeScreen({
           )}
 
           {correct && <Text style={styles.correctText}>Correct!</Text>}
+          {checked && activity.explanation && (
+            <Text style={styles.explanationText}>{activity.explanation}</Text>
+          )}
         </View>
 
         <DuoButton
@@ -500,256 +503,263 @@ export default function PracticeScreen({
   );
 }
 
-const createStyles = (colors) => StyleSheet.create({
-  screen: {
-    flex: 1,
-    backgroundColor: colors.screenBg,
-  },
+const createStyles = (colors) =>
+  StyleSheet.create({
+    screen: {
+      flex: 1,
+      backgroundColor: colors.screenBg,
+    },
 
-  container: {
-    flex: 1,
-    paddingHorizontal: 20,
-  },
+    container: {
+      flex: 1,
+      paddingHorizontal: 20,
+    },
 
-  emptyContainer: {
-    flex: 1,
-    padding: 20,
-  },
+    emptyContainer: {
+      flex: 1,
+      padding: 20,
+    },
 
-  scrollContent: {
-    paddingBottom: 110,
-  },
+    scrollContent: {
+      paddingBottom: 110,
+    },
 
-  backButton: {
-    marginTop: 40,
-    fontSize: 15,
-    fontWeight: "700",
-    color: colors.blue,
-  },
+    backButton: {
+      marginTop: 40,
+      fontSize: 15,
+      fontWeight: "700",
+      color: colors.blue,
+    },
 
-  headerRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    marginTop: 20,
-  },
+    headerRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      marginTop: 20,
+    },
 
-  title: {
-    fontSize: 26,
-    fontWeight: "800",
-    marginTop: 20,
-    color: colors.text,
-  },
+    title: {
+      fontSize: 26,
+      fontWeight: "800",
+      marginTop: 20,
+      color: colors.text,
+    },
 
-  subtitle: {
-    color: colors.textMuted,
-    marginTop: 6,
-    marginBottom: 22,
-  },
+    subtitle: {
+      color: colors.textMuted,
+      marginTop: 6,
+      marginBottom: 22,
+    },
 
-  progress: {
-    color: colors.textMuted,
-    marginTop: 10,
-    marginBottom: 8,
-    fontSize: 13,
-    fontWeight: "600",
-  },
+    progress: {
+      color: colors.textMuted,
+      marginTop: 10,
+      marginBottom: 8,
+      fontSize: 13,
+      fontWeight: "600",
+    },
 
-  progressTrack: {
-    height: 12,
-    borderRadius: radius.full,
-    backgroundColor: colors.border,
-    overflow: "hidden",
-    marginBottom: 20,
-  },
+    progressTrack: {
+      height: 12,
+      borderRadius: radius.full,
+      backgroundColor: colors.border,
+      overflow: "hidden",
+      marginBottom: 20,
+    },
 
-  progressFill: {
-    height: "100%",
-    borderRadius: radius.full,
-    backgroundColor: colors.green,
-  },
+    progressFill: {
+      height: "100%",
+      borderRadius: radius.full,
+      backgroundColor: colors.green,
+    },
 
-  activityCard: {
-    backgroundColor: "#fff",
-    borderRadius: radius.lg,
-    padding: 20,
-    borderWidth: 2,
-    borderColor: colors.border,
-  },
+    activityCard: {
+      backgroundColor: "#fff",
+      borderRadius: radius.lg,
+      padding: 20,
+      borderWidth: 2,
+      borderColor: colors.border,
+    },
 
-  xpTag: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-    borderRadius: radius.full,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-  },
+    xpTag: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 4,
+      borderRadius: radius.full,
+      paddingHorizontal: 10,
+      paddingVertical: 5,
+    },
 
-  xpTagText: {
-    fontSize: 12,
-    fontWeight: "800",
-  },
+    xpTagText: {
+      fontSize: 12,
+      fontWeight: "800",
+    },
 
-  question: {
-    fontSize: 19,
-    fontWeight: "700",
-    lineHeight: 26,
-    color: colors.text,
-  },
+    question: {
+      fontSize: 19,
+      fontWeight: "700",
+      lineHeight: 26,
+      color: colors.text,
+    },
 
-  sentence: {
-    fontSize: 16,
-    marginTop: 15,
-    marginBottom: 4,
-    color: colors.text,
-  },
+    sentence: {
+      fontSize: 16,
+      marginTop: 15,
+      marginBottom: 4,
+      color: colors.text,
+    },
 
-  input: {
-    borderWidth: 2,
-    borderColor: colors.border,
-    borderRadius: radius.md,
-    padding: 13,
-    fontSize: 15,
-    marginTop: 14,
-    color: colors.text,
-  },
+    input: {
+      borderWidth: 2,
+      borderColor: colors.border,
+      borderRadius: radius.md,
+      padding: 13,
+      fontSize: 15,
+      marginTop: 14,
+      color: colors.text,
+    },
 
-  correctInput: {
-    borderColor: colors.green,
-    backgroundColor: colors.greenBg,
-  },
+    correctInput: {
+      borderColor: colors.green,
+      backgroundColor: colors.greenBg,
+    },
 
-  wrongInput: {
-    borderColor: colors.red,
-    backgroundColor: colors.redLight,
-  },
+    wrongInput: {
+      borderColor: colors.red,
+      backgroundColor: colors.redLight,
+    },
 
-  option: {
-    flexDirection: "row",
-    alignItems: "center",
-    borderWidth: 2,
-    borderColor: colors.border,
-    borderRadius: radius.md,
-    padding: 14,
-    marginTop: 12,
-  },
+    option: {
+      flexDirection: "row",
+      alignItems: "center",
+      borderWidth: 2,
+      borderColor: colors.border,
+      borderRadius: radius.md,
+      padding: 14,
+      marginTop: 12,
+    },
 
-  selectedOption: {
-    backgroundColor: colors.blueLight,
-    borderColor: colors.blue,
-  },
+    selectedOption: {
+      backgroundColor: colors.blueLight,
+      borderColor: colors.blue,
+    },
 
-  correctOption: {
-    backgroundColor: colors.greenBg,
-    borderColor: colors.green,
-  },
+    correctOption: {
+      backgroundColor: colors.greenBg,
+      borderColor: colors.green,
+    },
 
-  incorrectOption: {
-    backgroundColor: colors.redLight,
-    borderColor: colors.red,
-  },
+    incorrectOption: {
+      backgroundColor: colors.redLight,
+      borderColor: colors.red,
+    },
 
-  optionLetter: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: colors.bgMuted,
-    justifyContent: "center",
-    alignItems: "center",
-    marginRight: 12,
-  },
+    optionLetter: {
+      width: 28,
+      height: 28,
+      borderRadius: 14,
+      backgroundColor: colors.bgMuted,
+      justifyContent: "center",
+      alignItems: "center",
+      marginRight: 12,
+    },
 
-  optionLetterSelected: {
-    backgroundColor: colors.blue,
-  },
+    optionLetterSelected: {
+      backgroundColor: colors.blue,
+    },
 
-  optionLetterText: {
-    fontSize: 12,
-    fontWeight: "800",
-    color: colors.textMuted,
-  },
+    optionLetterText: {
+      fontSize: 12,
+      fontWeight: "800",
+      color: colors.textMuted,
+    },
 
-  optionLetterTextSelected: {
-    color: "#fff",
-  },
+    optionLetterTextSelected: {
+      color: "#fff",
+    },
 
-  optionText: {
-    fontSize: 15,
-    flex: 1,
-    color: colors.text,
-  },
+    optionText: {
+      fontSize: 15,
+      flex: 1,
+      color: colors.text,
+    },
 
-  selectedOptionText: {
-    fontWeight: "700",
-  },
+    selectedOptionText: {
+      fontWeight: "700",
+    },
 
-  answer: {
-    color: colors.textMuted,
-    marginTop: 12,
-    fontSize: 14,
-    fontWeight: "600",
-  },
+    answer: {
+      color: colors.textMuted,
+      marginTop: 12,
+      fontSize: 14,
+      fontWeight: "600",
+    },
 
-  correctText: {
-    color: colors.greenDark,
-    marginTop: 12,
-    fontSize: 14,
-    fontWeight: "800",
-  },
+    correctText: {
+      color: colors.greenDark,
+      marginTop: 12,
+      fontSize: 14,
+      fontWeight: "800",
+    },
+    explanationText: {
+      color: colors.textMuted,
+      marginTop: 12,
+      fontSize: 13,
+      lineHeight: 19,
+    },
 
-  mainButton: {
-    marginTop: 20,
-  },
+    mainButton: {
+      marginTop: 20,
+    },
 
-  resultBadge: {
-    width: 88,
-    height: 88,
-    borderRadius: 44,
-    justifyContent: "center",
-    alignItems: "center",
-    alignSelf: "center",
-    marginTop: 60,
-  },
+    resultBadge: {
+      width: 88,
+      height: 88,
+      borderRadius: 44,
+      justifyContent: "center",
+      alignItems: "center",
+      alignSelf: "center",
+      marginTop: 60,
+    },
 
-  resultTitle: {
-    fontSize: 24,
-    fontWeight: "800",
-    textAlign: "center",
-    marginTop: 16,
-    color: colors.text,
-  },
+    resultTitle: {
+      fontSize: 24,
+      fontWeight: "800",
+      textAlign: "center",
+      marginTop: 16,
+      color: colors.text,
+    },
 
-  score: {
-    fontSize: 48,
-    fontWeight: "800",
-    textAlign: "center",
-    marginTop: 16,
-    color: colors.text,
-  },
+    score: {
+      fontSize: 48,
+      fontWeight: "800",
+      textAlign: "center",
+      marginTop: 16,
+      color: colors.text,
+    },
 
-  xpPill: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    alignSelf: "center",
-    backgroundColor: colors.blueLight,
-    borderRadius: radius.full,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    marginTop: 14,
-  },
+    xpPill: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 6,
+      alignSelf: "center",
+      backgroundColor: colors.blueLight,
+      borderRadius: radius.full,
+      paddingHorizontal: 14,
+      paddingVertical: 8,
+      marginTop: 14,
+    },
 
-  xpEarnedText: {
-    fontSize: 14,
-    fontWeight: "700",
-    color: colors.blueDark,
-  },
+    xpEarnedText: {
+      fontSize: 14,
+      fontWeight: "700",
+      color: colors.blueDark,
+    },
 
-  resultText: {
-    fontSize: 14,
-    color: colors.textMuted,
-    textAlign: "center",
-    marginTop: 10,
-  },
-});
+    resultText: {
+      fontSize: 14,
+      color: colors.textMuted,
+      textAlign: "center",
+      marginTop: 10,
+    },
+  });
