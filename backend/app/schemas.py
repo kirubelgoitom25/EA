@@ -26,7 +26,7 @@ class StudentOut(BaseModel):
 class LessonOut(BaseModel):
     id: str
     title: str
-    duration: str
+    duration: Optional[str] = None
     video_url: Optional[str] = None
     completed: bool
 
@@ -58,6 +58,8 @@ class QuizQuestionOut(BaseModel):
     id: int
     question: str
     options: list[str]
+    correct_index: int
+    explanation: Optional[str] = None
 
 
 class QuizOut(BaseModel):
@@ -94,6 +96,7 @@ class PracticeItemOut(BaseModel):
     options: Optional[list[str]] = None
     answer: Optional[str] = None
     correct_index: Optional[int] = None
+    explanation: Optional[str] = None
     xp: Decimal
 
 

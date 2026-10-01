@@ -121,6 +121,7 @@ class QuizQuestion(Base):
     question = Column(Text, nullable=False)
     options = Column(JSONB, nullable=False)
     correct_index = Column(Integer, nullable=False)
+    explanation = Column(Text, nullable=True)
     sort_order = Column(Integer, nullable=False, default=0)
 
     quiz = relationship("Quiz", back_populates="questions")
@@ -177,6 +178,7 @@ class PracticeItem(Base):
     options = Column(JSONB, nullable=True)
     answer = Column(Text, nullable=True)
     correct_index = Column(Integer, nullable=True)
+    explanation = Column(Text, nullable=True)
     sort_order = Column(Integer, nullable=False, default=0)
 
     practice = relationship("Practice", back_populates="items")

@@ -63,7 +63,13 @@ def get_quiz(
         "attempt_number": attempt_number,
         "xp_per_correct": _xp_per_correct(attempt_number),
         "questions": [
-            {"id": q.id, "question": q.question, "options": q.options}
+            {
+                "id": q.id,
+                "question": q.question,
+                "options": q.options,
+                "correct_index": q.correct_index,
+                "explanation": q.explanation,
+            }
             for q in quiz.questions
         ],
     }

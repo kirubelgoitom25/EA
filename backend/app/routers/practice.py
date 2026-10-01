@@ -63,6 +63,8 @@ def get_practice(
                 "question": item.question,
                 "sentence": item.sentence,
                 "options": item.options,
+                "correct_index": item.correct_index,
+                "explanation": item.explanation,
                 "xp": XP_BY_TYPE[item.type],
             }
             for item in practice.items
