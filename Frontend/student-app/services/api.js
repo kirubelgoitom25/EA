@@ -235,12 +235,13 @@ export async function fetchPracticeByLessonId(lessonId) {
         question: item.question,
         sentence: item.sentence,
         options: item.options,
+
         // The screen expects: a number (the right option's index) for
         // "choose", and the correct text for "fill".
         answer: item.type === "choose" ? item.correct_index : item.answer,
-         
-        explanation: item.explanation, 
-     
+
+        // Pass the explanation from the backend to PracticeScreen.
+        explanation: item.explanation,
       })),
     };
   } catch (error) {

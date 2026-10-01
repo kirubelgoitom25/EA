@@ -237,6 +237,8 @@ export default function PracticeScreen({
   const activities = practice.activities.map(normalizeActivity);
   const total = activities.length;
   const activity = activities[currentIndex];
+  console.log("PRACTICE ACTIVITY:", activity);
+  console.log("PRACTICE EXPLANATION:", activity.explanation);
   const isLast = currentIndex === total - 1;
 
   const userAnswer = answers[activity.id];
@@ -563,12 +565,6 @@ export default function PracticeScreen({
               returnKeyType="done"
               onSubmitEditing={handlePrimaryPress}
             />
-          )}
-
-          {wrong && (
-            <Text style={styles.answer}>
-              Correct answer: {String(getAnswerLabel(activity))}
-            </Text>
           )}
 
           {correct && <Text style={styles.correctText}>Correct!</Text>}
