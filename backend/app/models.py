@@ -26,9 +26,11 @@ class Profile(Base):
     name = Column(String, nullable=False)
     role = Column(String, nullable=False)
     is_active = Column(Boolean, nullable=False, default=True)
+    class_id = Column(String, ForeignKey("classes.id"), nullable=True)
     created_at = Column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
+    
 
 
 class Course(Base):
@@ -233,3 +235,17 @@ class Streak(Base):
     current_streak = Column(Integer, nullable=False, default=0)
     longest_streak = Column(Integer, nullable=False, default=0)
     last_activity_date = Column(Date, nullable=True)
+class Class(Base):
+    __tablename__ = "classes"
+
+    id = Column(String, primary_key=True)
+    name = Column(String, nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class ClassCourse(Base):
+    __tablename__ = "class_courses"
+
+    class_id = Column(String, ForeignKey("classes.id", ondelete="CASCADE"), primary_key=True)
+    course_id = Column(String, ForeignKey("courses.id", ondelete="CASCADE"), primary_key=True)
+    

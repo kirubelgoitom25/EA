@@ -21,6 +21,18 @@ STATS_QUERY = """
     where student_id = :student_id
 """
 
+CLASS_RANKING_QUERY = """
+    select p.id, p.name,
+           coalesce(sum(x.amount), 0) as xp,
+           coalesce(sum(x.amount) filter (where x.created_at >= now() - interval '7 days'), 0) as weekly_xp,
+           coalesce(sum(x.amount) filter (where x.created_at >= now() - interval '30 days'), 0) as monthly_xp
+    from public.profiles p
+    left join public.xp_events x on x.student_id = p.id
+    where p.role = 'student' and p.is_active and p.class_id is not distinct from :class_id
+    group by p.id, p.name
+    order by xp desc, p.name asc
+"""
+
 RANKING_QUERY = """
     select p.id, p.name,
            coalesce(sum(x.amount), 0) as xp,
@@ -35,9 +47,7 @@ RANKING_QUERY = """
 
 
 @router.get("/me/stats", response_model=MeStatsOut)
-def get_my_stats(
-    current_user: dict = Depends(require_student), db: Session = Depends(get_db)
-):
+def get_my_stats(current_user: dict = Depends(require_student), db: Session = Depends(get_db)):
     student_id = uuid.UUID(current_user["id"])
     row = db.execute(text(STATS_QUERY), {"student_id": student_id}).mappings().first()
     streak = db.get(Streak, student_id)
@@ -53,10 +63,18 @@ def get_my_stats(
 
 @router.get("/ranking", response_model=list[RankingEntryOut])
 def get_ranking(
+    scope: Literal["class", "national"] = Query("class"),
     current_user: dict = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    rows = db.execute(text(RANKING_QUERY)).mappings().all()
+    if scope == "class":
+        rows = db.execute(
+            text(CLASS_RANKING_QUERY),
+            {"class_id": current_user.get("class_id")},
+        ).mappings().all()
+    else:
+        rows = db.execute(text(RANKING_QUERY)).mappings().all()
+
     return [
         {
             "id": str(row["id"]),
