@@ -10,6 +10,7 @@ import {
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 
+import { haptic } from "../services/feedback";
 import { radius, useTheme } from "../theme";
 import BottomNavBar from "./BottomNavBar";
 
@@ -70,7 +71,7 @@ function CourseCard({ course, index, onSelectCourse, colors, styles }) {
 
   return (
     <Pressable
-      onPress={() => onSelectCourse(course)}
+      onPress={() => { haptic.light(); onSelectCourse(course); }}
       onPressIn={() =>
         Animated.timing(pressScale, {
           toValue: 0.985,
@@ -184,7 +185,7 @@ export default function CoursesScreen({
           }}
         >
           <Pressable
-            onPress={onBack}
+            onPress={() => { haptic.light(); onBack(); }}
             onPressIn={() =>
               Animated.timing(backScale, {
                 toValue: 0.96,

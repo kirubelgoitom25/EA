@@ -7,6 +7,7 @@ import React, {
 } from "react";
 import {
   Animated,
+  Dimensions,
   Easing,
   Pressable,
   View,
@@ -19,6 +20,7 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 
 import { fetchQuizByLessonId, submitQuiz } from "../services/api";
+import { feedback, haptic } from "../services/feedback";
 import { radius, useTheme } from "../theme";
 import BottomNavBar from "./BottomNavBar";
 import DuoButton from "./DuoButton";
@@ -65,7 +67,7 @@ function PressScale({ children, onPress, style, disabled = false }) {
 
   return (
     <Pressable
-      onPress={onPress}
+      onPress={onPress ? (event) => { haptic.light(); onPress(event); } : undefined}
       onPressIn={pressIn}
       onPressOut={pressOut}
       disabled={disabled}
@@ -77,6 +79,15 @@ function PressScale({ children, onPress, style, disabled = false }) {
     </Pressable>
   );
 }
+
+const SPARKS = Array.from({ length: 8 }, (_, i) => {
+  const a = (i / 8) * Math.PI * 2;
+  return {
+    dx: Math.cos(a) * 38,
+    dy: Math.sin(a) * 38,
+    color: i % 2 ? "#FFC800" : "#58CC02",
+  };
+});
 
 function AnswerOption({
   index,
@@ -94,6 +105,9 @@ function AnswerOption({
   const selection = useRef(new Animated.Value(0)).current;
   const feedback = useRef(new Animated.Value(0)).current;
   const shake = useRef(new Animated.Value(0)).current;
+  const burst = useRef(new Animated.Value(0)).current;
+  const pop = useRef(new Animated.Value(1)).current;
+  const hop = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     Animated.spring(selection, {
@@ -140,7 +154,72 @@ function AnswerOption({
         }),
       ]).start();
     }
-  }, [feedback, shake, showCorrect, showIncorrect]);
+
+    if (showCorrect) {
+      burst.setValue(0);
+      pop.setValue(1);
+      hop.setValue(0);
+      Animated.parallel([
+        Animated.sequence([
+          Animated.timing(hop, {
+            toValue: -16,
+            duration: 130,
+            easing: Easing.out(Easing.quad),
+            useNativeDriver: true,
+          }),
+          Animated.timing(hop, {
+            toValue: 0,
+            duration: 130,
+            easing: Easing.in(Easing.quad),
+            useNativeDriver: true,
+          }),
+          Animated.timing(hop, {
+            toValue: -8,
+            duration: 100,
+            easing: Easing.out(Easing.quad),
+            useNativeDriver: true,
+          }),
+          Animated.timing(hop, {
+            toValue: 0,
+            duration: 100,
+            easing: Easing.in(Easing.quad),
+            useNativeDriver: true,
+          }),
+          Animated.timing(hop, {
+            toValue: -3,
+            duration: 70,
+            easing: Easing.out(Easing.quad),
+            useNativeDriver: true,
+          }),
+          Animated.timing(hop, {
+            toValue: 0,
+            duration: 70,
+            easing: Easing.in(Easing.quad),
+            useNativeDriver: true,
+          }),
+        ]),
+        Animated.timing(burst, {
+          toValue: 1,
+          duration: 650,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: true,
+        }),
+        Animated.sequence([
+          Animated.timing(pop, {
+            toValue: 1.07,
+            duration: 120,
+            useNativeDriver: true,
+          }),
+          Animated.spring(pop, {
+            toValue: 1,
+            speed: 14,
+            bounciness: 14,
+            useNativeDriver: true,
+          }),
+        ]),
+      ]).start();
+    }
+  }, [feedback, shake, burst, pop, hop, showCorrect, showIncorrect]);
 
   const selectedScale = selection.interpolate({
     inputRange: [0, 1],
@@ -193,8 +272,14 @@ function AnswerOption({
           optionStyle,
           {
             transform: [
-              { scale: Animated.multiply(pressScale, selectedScale) },
+              {
+                scale: Animated.multiply(
+                  Animated.multiply(pressScale, selectedScale),
+                  pop,
+                ),
+              },
               { translateX: shakeX },
+              { translateY: hop },
             ],
           },
         ]}
@@ -228,22 +313,110 @@ function AnswerOption({
         <Text style={optionTextStyle}>{option}</Text>
 
         {(showCorrect || showIncorrect) && (
-          <Animated.View
-            style={{ opacity: feedback, transform: [{ scale: feedbackScale }] }}
+          <View
+            style={{
+              width: 22,
+              height: 22,
+              alignItems: "center",
+              justifyContent: "center",
+            }}
           >
-            <Ionicons
-              name={showCorrect ? "checkmark-circle" : "close-circle"}
-              size={22}
-              color={showCorrect ? colors.correct : colors.red}
-            />
-          </Animated.View>
+            {showCorrect && (
+              <>
+                <Animated.View
+                  pointerEvents="none"
+                  style={{
+                    position: "absolute",
+                    width: 22,
+                    height: 22,
+                    borderRadius: 11,
+                    borderWidth: 2,
+                    borderColor: colors.correct,
+                    opacity: burst.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [0.7, 0],
+                    }),
+                    transform: [
+                      {
+                        scale: burst.interpolate({
+                          inputRange: [0, 1],
+                          outputRange: [1, 3.2],
+                        }),
+                      },
+                    ],
+                  }}
+                />
+                {SPARKS.map((s, i) => (
+                  <Animated.View
+                    key={i}
+                    pointerEvents="none"
+                    style={{
+                      position: "absolute",
+                      width: 7,
+                      height: 7,
+                      borderRadius: 3.5,
+                      backgroundColor: s.color,
+                      opacity: burst.interpolate({
+                        inputRange: [0, 0.15, 1],
+                        outputRange: [0, 1, 0],
+                      }),
+                      transform: [
+                        {
+                          translateX: burst.interpolate({
+                            inputRange: [0, 1],
+                            outputRange: [0, s.dx],
+                          }),
+                        },
+                        {
+                          translateY: burst.interpolate({
+                            inputRange: [0, 1],
+                            outputRange: [0, s.dy],
+                          }),
+                        },
+                        {
+                          scale: burst.interpolate({
+                            inputRange: [0, 0.3, 1],
+                            outputRange: [0.4, 1.2, 0.3],
+                          }),
+                        },
+                      ],
+                    }}
+                  />
+                ))}
+              </>
+            )}
+            <Animated.View
+              style={{
+                opacity: feedback,
+                transform: [
+                  { scale: feedbackScale },
+                  {
+                    rotate: feedback.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: showCorrect
+                        ? ["-45deg", "0deg"]
+                        : ["0deg", "0deg"],
+                    }),
+                  },
+                ],
+              }}
+            >
+              <Ionicons
+                name={showCorrect ? "checkmark-circle" : "close-circle"}
+                size={22}
+                color={showCorrect ? colors.correct : colors.red}
+              />
+            </Animated.View>
+          </View>
         )}
       </Animated.View>
     </Pressable>
   );
 }
 
-function CountUp({ value, style }) {
+// Counts from 0 up to `value`. `delay` lets the count start only once the
+// number is actually visible on screen.
+function CountUp({ value, style, delay = 0, duration = 680 }) {
   const animatedValue = useRef(new Animated.Value(0)).current;
   const [count, setCount] = useState(0);
 
@@ -256,7 +429,8 @@ function CountUp({ value, style }) {
 
     Animated.timing(animatedValue, {
       toValue: value,
-      duration: 680,
+      duration,
+      delay,
       easing: Easing.out(Easing.cubic),
       useNativeDriver: false,
     }).start();
@@ -265,7 +439,7 @@ function CountUp({ value, style }) {
       animatedValue.removeListener(listenerId);
       animatedValue.stopAnimation();
     };
-  }, [animatedValue, value]);
+  }, [animatedValue, value, delay, duration]);
 
   return <Text style={style}>{count}</Text>;
 }
@@ -308,6 +482,179 @@ function QuestionCounter({ currentQuestion, totalQuestions, motion, styles }) {
         <Text style={styles.counterTotal}>/ {totalQuestions}</Text>
       </View>
     </Animated.View>
+  );
+}
+
+const CONFETTI_COLORS = [
+  "#FFC800",
+  "#58CC02",
+  "#FF9600",
+  "#1CB0F6",
+  "#FF4B4B",
+  "#CE82FF",
+];
+
+function Confetti({ count = 40 }) {
+  const { width, height } = Dimensions.get("window");
+  const pieces = useRef(
+    Array.from({ length: count }, (_, i) => ({
+      x: Math.random() * width,
+      size: 6 + Math.random() * 7,
+      delay: Math.random() * 700,
+      duration: 2200 + Math.random() * 1600,
+      drift: (Math.random() - 0.5) * 120,
+      spin: 2 + Math.random() * 3,
+      color: CONFETTI_COLORS[i % CONFETTI_COLORS.length],
+      progress: new Animated.Value(0),
+    })),
+  ).current;
+
+  useEffect(() => {
+    const anims = pieces.map((p) =>
+      Animated.timing(p.progress, {
+        toValue: 1,
+        duration: p.duration,
+        delay: p.delay,
+        easing: Easing.in(Easing.quad),
+        useNativeDriver: true,
+      }),
+    );
+    Animated.parallel(anims).start();
+    return () => anims.forEach((a) => a.stop());
+  }, [pieces]);
+
+  return (
+    <View pointerEvents="none" style={StyleSheet.absoluteFill}>
+      {pieces.map((p, i) => (
+        <Animated.View
+          key={i}
+          style={{
+            position: "absolute",
+            left: p.x,
+            top: 0,
+            width: p.size,
+            height: p.size * 1.6,
+            borderRadius: 2,
+            backgroundColor: p.color,
+            opacity: p.progress.interpolate({
+              inputRange: [0, 0.05, 0.85, 1],
+              outputRange: [0, 1, 1, 0],
+            }),
+            transform: [
+              {
+                translateY: p.progress.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: [-30, height],
+                }),
+              },
+              {
+                translateX: p.progress.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: [0, p.drift],
+                }),
+              },
+              {
+                rotate: p.progress.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: ["0deg", `${p.spin * 360}deg`],
+                }),
+              },
+            ],
+          }}
+        />
+      ))}
+    </View>
+  );
+}
+
+function GlowRings({ color }) {
+  const rings = useRef([0, 1].map(() => new Animated.Value(0))).current;
+
+  useEffect(() => {
+    const anims = rings.map((r, i) =>
+      Animated.sequence([
+        Animated.delay(i * 1000),
+        Animated.loop(
+          Animated.timing(r, {
+            toValue: 1,
+            duration: 2000,
+            easing: Easing.out(Easing.quad),
+            useNativeDriver: true,
+          }),
+        ),
+      ]),
+    );
+    anims.forEach((a) => a.start());
+    return () => anims.forEach((a) => a.stop());
+  }, [rings]);
+
+  return rings.map((r, i) => (
+    <Animated.View
+      key={i}
+      pointerEvents="none"
+      style={{
+        position: "absolute",
+        width: 88,
+        height: 88,
+        borderRadius: 44,
+        borderWidth: 3,
+        borderColor: color,
+        opacity: r.interpolate({ inputRange: [0, 1], outputRange: [0.6, 0] }),
+        transform: [
+          { scale: r.interpolate({ inputRange: [0, 1], outputRange: [1, 2.3] }) },
+        ],
+      }}
+    />
+  ));
+}
+
+function StarsRow({ color }) {
+  const stars = useRef([0, 1, 2].map(() => new Animated.Value(0))).current;
+
+  useEffect(() => {
+    Animated.stagger(
+      140,
+      stars.map((s) =>
+        Animated.spring(s, {
+          toValue: 1,
+          speed: 12,
+          bounciness: 16,
+          useNativeDriver: true,
+        }),
+      ),
+    ).start();
+  }, [stars]);
+
+  return (
+    <View
+      style={{
+        flexDirection: "row",
+        justifyContent: "center",
+        alignItems: "flex-end",
+        gap: 8,
+        marginTop: 14,
+      }}
+    >
+      {stars.map((s, i) => (
+        <Animated.View
+          key={i}
+          style={{
+            opacity: s,
+            transform: [
+              { scale: s },
+              {
+                rotate: s.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: ["-90deg", "0deg"],
+                }),
+              },
+            ],
+          }}
+        >
+          <Ionicons name="star" size={i === 1 ? 38 : 30} color={color} />
+        </Animated.View>
+      ))}
+    </View>
   );
 }
 
@@ -406,6 +753,7 @@ export default function QuizScreen({
   const resultXpMotion = useRef(new Animated.Value(0)).current;
   const resultActionsMotion = useRef(new Animated.Value(0)).current;
   const resultExitMotion = useRef(new Animated.Value(1)).current;
+  const xpPulse = useRef(new Animated.Value(1)).current;
   const entrancePlayedForQuiz = useRef(false);
   const transitionLock = useRef(false);
 
@@ -440,24 +788,24 @@ export default function QuizScreen({
     quiz,
   ]);
 
+  // Result screen entrance.
+  //
+  // IMPORTANT: the trophy badge gets its own spring on a perfect score and is
+  // NOT part of the stagger. Animating the same value from both places
+  // interrupts the stagger, and Animated.stagger cancels every other child
+  // when one is interrupted. That left the title, score, XP and buttons
+  // invisible on a perfect score.
   useEffect(() => {
     if (!finished) {
-      return;
+      return undefined;
     }
 
     resultExitMotion.setValue(1);
-    playEntrance(
-      [
-        resultBadgeMotion,
-        resultTitleMotion,
-        resultScoreMotion,
-        resultXpMotion,
-        resultActionsMotion,
-      ],
-      75,
-    );
+    xpPulse.setValue(1);
 
-    if (quiz && score === quiz.questions.length) {
+    const isPerfectRun = !!quiz && score === quiz.questions.length;
+
+    if (isPerfectRun) {
       resultBadgeMotion.setValue(0);
       Animated.spring(resultBadgeMotion, {
         toValue: 1,
@@ -465,7 +813,47 @@ export default function QuizScreen({
         bounciness: 11,
         useNativeDriver: true,
       }).start();
+
+      playEntrance(
+        [
+          resultTitleMotion,
+          resultScoreMotion,
+          resultXpMotion,
+          resultActionsMotion,
+        ],
+        75,
+      );
+    } else {
+      playEntrance(
+        [
+          resultBadgeMotion,
+          resultTitleMotion,
+          resultScoreMotion,
+          resultXpMotion,
+          resultActionsMotion,
+        ],
+        75,
+      );
     }
+
+    // A little pop on the XP pill once its number has finished counting.
+    const pulse = Animated.sequence([
+      Animated.delay(1650),
+      Animated.timing(xpPulse, {
+        toValue: 1.12,
+        duration: 140,
+        useNativeDriver: true,
+      }),
+      Animated.spring(xpPulse, {
+        toValue: 1,
+        speed: 14,
+        bounciness: 12,
+        useNativeDriver: true,
+      }),
+    ]);
+    pulse.start();
+
+    return () => pulse.stop();
   }, [
     finished,
     quiz,
@@ -476,6 +864,7 @@ export default function QuizScreen({
     resultTitleMotion,
     resultXpMotion,
     score,
+    xpPulse,
   ]);
 
   useEffect(() => {
@@ -570,6 +959,15 @@ export default function QuizScreen({
     }
 
     setSelectedAnswer(index);
+    if (revealsAnswers) {
+      if (index === correctIndex) {
+        feedback.correct();
+      } else {
+        feedback.wrong();
+      }
+    } else {
+      feedback.button();
+    }
   };
 
   const handleNext = async () => {
@@ -581,6 +979,7 @@ export default function QuizScreen({
     const isLastQuestion = currentQuestion === quiz.questions.length - 1;
 
     if (!isLastQuestion) {
+      haptic.light();
       transitionLock.current = true;
       setIsTransitioning(true);
       Animated.timing(questionMotion, {
@@ -632,6 +1031,7 @@ export default function QuizScreen({
       setXpEarned(result.xpEarned);
       setNextXpPerCorrect(result.nextXpPerCorrect);
       setFinished(true);
+      feedback.complete({ xp: result.xpEarned });
 
       if (onComplete) {
         onComplete();
@@ -711,6 +1111,7 @@ export default function QuizScreen({
                 },
               ]}
             >
+              {isPerfect && <GlowRings color={colors.gold} />}
               <Ionicons
                 name={isPerfect ? "trophy" : "checkmark-circle"}
                 size={44}
@@ -731,7 +1132,12 @@ export default function QuizScreen({
                 ],
               }}
             >
-              <Text style={styles.resultTitle}>Quiz Complete!</Text>
+              <Text
+                style={[styles.resultTitle, isPerfect && { color: colors.gold }]}
+              >
+                {isPerfect ? "Perfect Score!" : "Quiz Complete!"}
+              </Text>
+              {isPerfect && <StarsRow color={colors.gold} />}
             </Animated.View>
 
             <Animated.View
@@ -750,7 +1156,12 @@ export default function QuizScreen({
                 },
               ]}
             >
-              <CountUp value={score} style={styles.score} />
+              <CountUp
+                value={score}
+                delay={350}
+                duration={800}
+                style={styles.score}
+              />
               <Text style={styles.scoreTotal}>/ {totalQuestions}</Text>
             </Animated.View>
 
@@ -766,19 +1177,25 @@ export default function QuizScreen({
                         outputRange: [9, 0],
                       }),
                     },
+                    { scale: xpPulse },
                   ],
                 },
               ]}
             >
               <Ionicons name="flash" size={17} color={colors.orange} />
               <Text style={styles.resultText}>You earned </Text>
-              <CountUp value={xpEarned} style={styles.resultText} />
+              <CountUp
+                value={xpEarned}
+                delay={550}
+                duration={1000}
+                style={styles.resultText}
+              />
               <Text style={styles.resultText}> XP</Text>
             </Animated.View>
 
             <Text style={styles.resultSubtext}>
               {isPerfect
-                ? "Perfect score!"
+                ? "Flawless! Every answer was right."
                 : "Nice work — review and try again anytime."}
             </Text>
 
@@ -811,6 +1228,7 @@ export default function QuizScreen({
             </Animated.View>
           </Animated.View>
         </ScrollView>
+        {isPerfect && <Confetti />}
       </NavBarWrapper>
     );
   }
@@ -997,7 +1415,6 @@ export default function QuizScreen({
                   </Text>
                 </View>
               )}
-              
             </View>
           </Animated.View>
         </Animated.View>
@@ -1026,6 +1443,7 @@ export default function QuizScreen({
             variant="primary"
             disabled={selectedAnswer === null || submitting || isTransitioning}
             onPress={handleNext}
+            hapticEnabled={false}
             style={styles.mainButton}
           />
         </Animated.View>

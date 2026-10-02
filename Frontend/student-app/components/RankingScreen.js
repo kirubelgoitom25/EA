@@ -15,9 +15,11 @@ import {
   Platform,
   Pressable,
   UIManager,
+  RefreshControl,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 
+import { haptic } from "../services/feedback";
 import { radius, useTheme } from "../theme";
 import BottomNavBar from "./BottomNavBar";
 
@@ -31,7 +33,8 @@ if (
   UIManager.setLayoutAnimationEnabledExperimental(true);
 }
 
-const PERIODS = ["Weekly", "Monthly", "Overall"];
+const PERIODS = ["weekly", "monthly", "overall"];
+const SCOPES = ["class", "national"];
 
 const HEADER_HEIGHT = 92; // 44 top inset + 36 button + 12 bottom
 const ROWS_START = 400; // ms before the first learner row enters
@@ -44,8 +47,8 @@ const EASE_POP = Easing.out(Easing.back(1.6));
 const PODIUM_DELAY = { 2: 300, 3: 360, 1: 440 };
 
 const getXpForPeriod = (item, period) => {
-  if (period === "Weekly" && typeof item.weeklyXp === "number") return item.weeklyXp;
-  if (period === "Monthly" && typeof item.monthlyXp === "number") return item.monthlyXp;
+  if (period === "weekly" && typeof item.weeklyXp === "number") return item.weeklyXp;
+  if (period === "monthly" && typeof item.monthlyXp === "number") return item.monthlyXp;
   return item.xp ?? 0;
 };
 
@@ -151,7 +154,7 @@ function PressableScale({
     <Pressable
       {...rest}
       style={pressableStyle}
-      onPress={onPress}
+      onPress={onPress ? (event) => { haptic.light(); onPress(event); } : undefined}
       onPressIn={() => animateTo(scaleTo)}
       onPressOut={() => animateTo(1)}
     >
@@ -394,9 +397,16 @@ function LearnerRow({ item, index, styles }) {
 /* ------------------------------------------------------------------ */
 
 export default function RankingScreen({
-  student,
-  ranking,
+  student = {},
+  ranking = [],
+  yourPosition = null,
+  yourXp,
+  rankingScope = "class",
+  onRankingScopeChange = () => {},
+  rankingPeriod = "weekly",
+  onRankingPeriodChange = () => {},
   onBack,
+  onRefresh,
   onHome,
   onCourses,
   onRanking,
@@ -404,34 +414,37 @@ export default function RankingScreen({
 }) {
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
-  const [period, setPeriod] = useState("Weekly");
+  const period = rankingPeriod;
   const [tabWidth, setTabWidth] = useState(0);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   const tabAnim = useRef(new Animated.Value(0)).current; // 0..2 = active tab
   const swap = useRef(new Animated.Value(1)).current; // list/podium fade on switch
   const scrollY = useRef(new Animated.Value(0)).current;
 
+  const handleRefresh = useCallback(async () => {
+    if (!onRefresh) return;
+    setIsRefreshing(true);
+    try {
+      await onRefresh();
+    } finally {
+      setIsRefreshing(false);
+    }
+  }, [onRefresh]);
+
   const leaderboard = useMemo(() => {
-    const others = ranking
-      .filter((item) => item.id !== student.id)
-      .map((item) => ({ ...item, isCurrentUser: false }));
-
-    const currentStudent = {
-      id: student.id,
-      name: student.name,
-      xp: student.xp,
-      weeklyXp: student.weeklyXp,
-      monthlyXp: student.monthlyXp,
-      isCurrentUser: true,
-    };
-
-    return [...others, currentStudent]
+    return (Array.isArray(ranking) ? ranking : [])
+      .map((item) => ({ ...item, isCurrentUser: item.id === student.id }))
       .map((item) => ({ ...item, periodXp: getXpForPeriod(item, period) }))
       .sort((a, b) => b.periodXp - a.periodXp);
   }, [student, ranking, period]);
 
-  const currentPosition = leaderboard.findIndex((item) => item.isCurrentUser) + 1;
-  const currentXp = leaderboard.find((item) => item.isCurrentUser)?.periodXp ?? 0;
+  const currentEntry = leaderboard.find((item) => item.isCurrentUser);
+  const currentPosition =
+    yourPosition ??
+    currentEntry?.position ??
+    (currentEntry ? leaderboard.indexOf(currentEntry) + 1 : null);
+  const currentXp = yourXp ?? currentEntry?.periodXp ?? 0;
   const topThree = leaderboard.slice(0, 3);
 
   const handlePeriodChange = useCallback(
@@ -459,9 +472,9 @@ export default function RankingScreen({
         useNativeDriver: true,
       }).start();
 
-      setPeriod(next);
+      onRankingPeriodChange(next);
     },
-    [period, swap, tabAnim]
+    [period, swap, tabAnim, onRankingPeriodChange]
   );
 
   const handleTabsLayout = useCallback((event) => {
@@ -522,7 +535,42 @@ export default function RankingScreen({
         showsVerticalScrollIndicator={false}
         onScroll={onScroll}
         scrollEventThrottle={16}
+        refreshControl={
+          <RefreshControl
+            refreshing={isRefreshing}
+            onRefresh={handleRefresh}
+            tintColor={colors.orange}
+            colors={[colors.orange]}
+            progressViewOffset={HEADER_HEIGHT}
+          />
+        }
       >
+        <Entrance delay={40} style={styles.scopeTabsContainer}>
+          {SCOPES.map((scope) => {
+            const isActive = rankingScope === scope;
+            return (
+              <PressableScale
+                key={scope}
+                pressableStyle={styles.scopeTabPressable}
+                style={[styles.scopeTab, isActive && styles.scopeTabActive]}
+                scaleTo={0.95}
+                onPress={() => onRankingScopeChange(scope)}
+                accessibilityRole="button"
+                accessibilityState={{ selected: isActive }}
+              >
+                <Text
+                  style={[
+                    styles.scopeTabText,
+                    isActive && styles.scopeTabTextActive,
+                  ]}
+                >
+                  {scope === "class" ? "Class" : "National"}
+                </Text>
+              </PressableScale>
+            );
+          })}
+        </Entrance>
+
         <Entrance delay={70} style={styles.tabsContainer} onLayout={handleTabsLayout}>
           {pillReady && (
             <Animated.View
@@ -552,7 +600,7 @@ export default function RankingScreen({
                     isActive && pillReady && styles.activeTabText,
                   ]}
                 >
-                  {item}
+                  {item[0].toUpperCase() + item.slice(1)}
                 </Text>
               </PressableScale>
             );
@@ -573,7 +621,9 @@ export default function RankingScreen({
             </Entrance>
             <View>
               <Text style={styles.userCardLabel}>Your position</Text>
-              <Text style={styles.userCardValue}>#{currentPosition}</Text>
+              <Text style={styles.userCardValue}>
+                {currentPosition ? `#${currentPosition}` : "--"}
+              </Text>
             </View>
           </View>
 
@@ -703,6 +753,28 @@ const createStyles = (colors) => {
     },
     headerTitle: { fontSize: 24, fontWeight: "900", color: colors.text, letterSpacing: -0.5 },
     headerSpacer: { width: 36 },
+
+    // Scope tabs
+    scopeTabsContainer: {
+      flexDirection: "row",
+      gap: 8,
+      marginBottom: 12,
+    },
+    scopeTabPressable: { flex: 1 },
+    scopeTab: {
+      paddingVertical: 10,
+      alignItems: "center",
+      borderRadius: radius.md,
+      backgroundColor: colors.card,
+      borderWidth: 1,
+      borderColor: colors.border,
+    },
+    scopeTabActive: {
+      backgroundColor: colors.orange,
+      borderColor: colors.orange,
+    },
+    scopeTabText: { fontWeight: "800", color: colors.textMuted, fontSize: 13 },
+    scopeTabTextActive: { color: "#fff" },
 
     // Tabs
     tabsContainer: {

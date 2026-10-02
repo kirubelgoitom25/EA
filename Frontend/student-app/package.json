@@ -8,6 +8,8 @@
     "@supabase/supabase-js": "^2.117.2",
     "aes-js": "^3.1.2",
     "expo": "~57.0.24",
+    "expo-audio": "~57.0.5",
+    "expo-haptics": "~57.0.3",
     "expo-linear-gradient": "~57.0.2",
     "expo-secure-store": "~57.0.4",
     "expo-sqlite": "~57.0.3",

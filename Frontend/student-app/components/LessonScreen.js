@@ -11,6 +11,7 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import YoutubePlayer from "react-native-youtube-iframe";
 
+import { haptic } from "../services/feedback";
 import { radius, useTheme } from "../theme";
 import BottomNavBar from "./BottomNavBar";
 import DuoButton from "./DuoButton";
@@ -78,7 +79,7 @@ export default function LessonScreen({
         style={styles.container}
         contentContainerStyle={styles.scrollContent}
       >
-        <TouchableOpacity onPress={onBack}>
+        <TouchableOpacity onPress={() => { haptic.light(); onBack(); }}>
           <Text style={styles.backButton}>← Course</Text>
         </TouchableOpacity>
 
@@ -104,7 +105,7 @@ export default function LessonScreen({
               />
             </View>
 
-            <TouchableOpacity onPress={openInYouTube}>
+            <TouchableOpacity onPress={() => { haptic.light(); openInYouTube(); }}>
               <Text style={styles.externalLink}>
                 Having trouble? Open in YouTube app →
               </Text>

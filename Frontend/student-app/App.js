@@ -1,4 +1,10 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { View, ActivityIndicator, StyleSheet, Alert, LogBox } from "react-native";
 
 import LoginScreen from "./components/LoginScreen";
@@ -24,6 +30,8 @@ import { useTheme } from "./theme";
 
 LogBox.ignoreAllLogs();
 
+const EMPTY_RANKING = { entries: [], yourPosition: null, yourXp: 0 };
+
 export default function App() {
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
@@ -33,17 +41,37 @@ export default function App() {
 
   const [student, setStudent] = useState(null);
   const [courses, setCourses] = useState([]);
-  const [ranking, setRanking] = useState([]);
+  const [ranking, setRanking] = useState(EMPTY_RANKING);
+  const [rankingScope, setRankingScope] = useState("class");
+  const [rankingPeriod, setRankingPeriod] = useState("weekly");
   const [loadingData, setLoadingData] = useState(false);
 
   const [selectedCourse, setSelectedCourse] = useState(null);
   const [selectedLesson, setSelectedLesson] = useState(null);
 
+  // Used by refreshProgress (see below).
+  const loggedIn = useRef(false);
+  const currentUserId = useRef(null);
+  const rankingRequestId = useRef(0);
+  const refreshInFlight = useRef(false);
+  const refreshQueued = useRef(false);
+
+  useEffect(() => {
+    loggedIn.current = !!user;
+    currentUserId.current = user?.id ?? null;
+  }, [user]);
+
   const resetToLogin = useCallback(() => {
+    loggedIn.current = false;
+    currentUserId.current = null;
+    rankingRequestId.current += 1;
+    refreshQueued.current = false;
     setUser(null);
     setStudent(null);
     setCourses([]);
-    setRanking([]);
+    setRanking(EMPTY_RANKING);
+    setRankingScope("class");
+    setRankingPeriod("weekly");
     setSelectedCourse(null);
     setSelectedLesson(null);
     setScreen("login");
@@ -93,7 +121,11 @@ export default function App() {
     let cancelled = false;
     setLoadingData(true);
 
-    Promise.all([fetchStudent(), fetchCourses(), fetchRanking()])
+    Promise.all([
+      fetchStudent(),
+      fetchCourses(),
+      fetchRanking(rankingScope, rankingPeriod),
+    ])
       .then(([studentData, coursesData, rankingData]) => {
         if (cancelled) {
           return;
@@ -121,33 +153,71 @@ export default function App() {
     };
   }, [user]);
 
-  // After the server records a quiz or practice, ask it what's true now.
-  // XP, streak, ranking and lesson checkmarks all come from the server.
+  // Ask the server what's true now. XP, streak, ranking and lesson
+  // checkmarks all come from the server.
+  //
+  // Called after a quiz/practice is recorded, every time the user switches
+  // screens, and on pull-to-refresh. If a refresh is already running, we
+  // remember to run exactly one more when it finishes instead of sending
+  // requests in parallel. A failed refresh keeps what's on screen: it never
+  // clears data or logs the user out.
   const refreshProgress = useCallback(async () => {
+    const requestedUserId = currentUserId.current;
+    if (!requestedUserId) return;
+    const rankingRequest = ++rankingRequestId.current;
+    if (refreshInFlight.current) {
+      refreshQueued.current = true;
+      return;
+    }
+
+    refreshInFlight.current = true;
     try {
       const [studentData, coursesData, rankingData] = await Promise.all([
         fetchStudent(),
         fetchCourses(),
-        fetchRanking(),
+        fetchRanking(rankingScope, rankingPeriod),
       ]);
+
+      if (!loggedIn.current) {
+        return; // logged out while this was loading
+      }
+
+      if (currentUserId.current !== requestedUserId) return;
+
       setStudent(studentData);
       setCourses(coursesData);
-      setRanking(rankingData);
+      if (rankingRequestId.current === rankingRequest) {
+        setRanking(rankingData);
+      }
       setSelectedCourse((current) =>
         current
           ? coursesData.find((course) => course.id === current.id) ?? current
           : current
       );
     } catch (error) {
-      // Progress refresh failures are handled by the UI and alerts.
+      // Keep the current data on screen.
+    } finally {
+      refreshInFlight.current = false;
+      if (refreshQueued.current) {
+        refreshQueued.current = false;
+        refreshProgress();
+      }
     }
-  }, []);
+  }, [rankingScope, rankingPeriod]);
+
+  // Switch screens, and fetch fresh data whenever the screen actually changes.
+  const goTo = (target) => {
+    if (target !== screen) {
+      refreshProgress();
+    }
+    setScreen(target);
+  };
 
   const navProps = {
-    onHome: () => setScreen("home"),
-    onCourses: () => setScreen("courses"),
-    onRanking: () => setScreen("ranking"),
-    onProfile: () => setScreen("profile"),
+    onHome: () => goTo("home"),
+    onCourses: () => goTo("courses"),
+    onRanking: () => goTo("ranking"),
+    onProfile: () => goTo("profile"),
   };
 
   const handleLogin = async ({ email, password }) => {
@@ -164,6 +234,58 @@ export default function App() {
     await logoutUser();
   };
 
+  const onRankingScopeChange = useCallback(
+    async (scope) => {
+      const requestedUserId = currentUserId.current;
+      if (!requestedUserId) return;
+      const requestId = ++rankingRequestId.current;
+      setRankingScope(scope);
+      try {
+        const result = await fetchRanking(scope, rankingPeriod);
+        if (
+          currentUserId.current === requestedUserId &&
+          rankingRequestId.current === requestId
+        ) {
+          setRanking(result);
+        }
+      } catch (error) {
+        if (
+          currentUserId.current === requestedUserId &&
+          rankingRequestId.current === requestId
+        ) {
+          Alert.alert("Couldn't load ranking", error.message);
+        }
+      }
+    },
+    [rankingPeriod]
+  );
+
+  const onRankingPeriodChange = useCallback(
+    async (period) => {
+      const requestedUserId = currentUserId.current;
+      if (!requestedUserId) return;
+      const requestId = ++rankingRequestId.current;
+      setRankingPeriod(period);
+      try {
+        const result = await fetchRanking(rankingScope, period);
+        if (
+          currentUserId.current === requestedUserId &&
+          rankingRequestId.current === requestId
+        ) {
+          setRanking(result);
+        }
+      } catch (error) {
+        if (
+          currentUserId.current === requestedUserId &&
+          rankingRequestId.current === requestId
+        ) {
+          Alert.alert("Couldn't load ranking", error.message);
+        }
+      }
+    },
+    [rankingScope]
+  );
+
   const openCourse = (course) => {
     setSelectedCourse(course);
     setScreen("course");
@@ -173,6 +295,10 @@ export default function App() {
     setSelectedLesson(lesson);
     setScreen("lesson");
   };
+
+  const rankingEntries = Array.isArray(ranking?.entries)
+    ? ranking.entries
+    : [];
 
   if (restoring) {
     return (
@@ -199,7 +325,7 @@ export default function App() {
       <HomeScreen
         user={student}
         courses={courses}
-        ranking={ranking}
+        ranking={rankingEntries}
         {...navProps}
         onSelectCourse={openCourse}
         onLogout={handleLogout}
@@ -211,8 +337,8 @@ export default function App() {
     return (
       <ProfileScreen
         user={student}
-        ranking={ranking}
-        onBack={() => setScreen("home")}
+        ranking={rankingEntries}
+        onBack={() => goTo("home")}
         onLogout={handleLogout}
         {...navProps}
       />
@@ -224,7 +350,7 @@ export default function App() {
       <CoursesScreen
         courses={courses}
         onSelectCourse={openCourse}
-        onBack={() => setScreen("home")}
+        onBack={() => goTo("home")}
         {...navProps}
       />
     );
@@ -235,7 +361,7 @@ export default function App() {
       <CourseScreen
         course={selectedCourse}
         onSelectLesson={openLesson}
-        onBack={() => setScreen("courses")}
+        onBack={() => goTo("courses")}
         {...navProps}
       />
     );
@@ -279,8 +405,15 @@ export default function App() {
     return (
       <RankingScreen
         student={student}
-        ranking={ranking}
-        onBack={() => setScreen("home")}
+        ranking={rankingEntries}
+        yourPosition={ranking?.yourPosition ?? null}
+        yourXp={ranking?.yourXp ?? 0}
+        rankingScope={rankingScope}
+        onRankingScopeChange={onRankingScopeChange}
+        rankingPeriod={rankingPeriod}
+        onRankingPeriodChange={onRankingPeriodChange}
+        onBack={() => goTo("home")}
+        onRefresh={refreshProgress}
         {...navProps}
       />
     );

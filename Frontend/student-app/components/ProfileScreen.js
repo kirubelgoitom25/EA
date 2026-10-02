@@ -15,10 +15,12 @@ import {
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
 
+import { haptic } from "../services/feedback";
 import { radius, useTheme } from "../theme";
 import BottomNavBar from "./BottomNavBar";
 import XpProgressRing from "./XpProgressRing";
 import DuoButton from "./DuoButton";
+import FeedbackSettings from "../components/FeedbackSettings";
 
 // Enable LayoutAnimation on Android
 if (
@@ -31,7 +33,7 @@ if (
 // Same interaction language as HomeScreen: cards 0.97, buttons 0.96
 const PRESS_SCALE_BUTTON = 0.96;
 const SMALL_HIT_SLOP = { top: 8, bottom: 8, left: 8, right: 8 };
-const SECTION_COUNT = 7; // header, identity, stats, appearance, coach, account, logout
+const SECTION_COUNT = 8; // header, identity, stats, appearance, feedback, coach, account, logout
 
 const getInitials = (name) => {
   if (!name) return "?";
@@ -108,7 +110,7 @@ function ScalePressable({
 
   return (
     <Pressable
-      onPress={onPress}
+      onPress={onPress ? (event) => { haptic.light(); onPress(event); } : undefined}
       onPressIn={handlePressIn}
       onPressOut={handlePressOut}
       hitSlop={hitSlop}
@@ -229,7 +231,7 @@ function ThemeSwatch({ item, selected, onSelect, styles }) {
 
 export default function ProfileScreen({
   user,
-  ranking,
+  ranking = [],
   onBack,
   onLogout,
   onHome,
@@ -401,7 +403,7 @@ export default function ProfileScreen({
           <View style={styles.divider} />
 
           <Pressable
-            onPress={toggleAppearance}
+            onPress={() => { haptic.light(); toggleAppearance(); }}
             style={styles.appearanceHeaderButton}
             accessibilityRole="button"
             accessibilityLabel="Appearance settings"
@@ -465,8 +467,15 @@ export default function ProfileScreen({
           )}
         </Animated.View>
 
-        {/* EA Coach — coming soon (intentionally not interactive) */}
+        {/* Feedback settings */}
         <Animated.View style={riseInStyle(entrances[4])}>
+          <View style={styles.divider} />
+          <Text style={styles.sectionTitle}>FEEDBACK</Text>
+          <FeedbackSettings />
+        </Animated.View>
+
+        {/* EA Coach — coming soon (intentionally not interactive) */}
+        <Animated.View style={riseInStyle(entrances[5])}>
           <View style={styles.divider} />
 
           <View style={styles.sectionHeaderRow}>
@@ -503,7 +512,7 @@ export default function ProfileScreen({
         </Animated.View>
 
         {/* Account */}
-        <Animated.View style={riseInStyle(entrances[5])}>
+        <Animated.View style={riseInStyle(entrances[6])}>
           <View style={styles.divider} />
 
           <Text style={[styles.sectionTitle, styles.accountTitle]}>
@@ -559,7 +568,7 @@ export default function ProfileScreen({
         <Animated.View
           style={[
             styles.logoutWrap,
-            riseInStyle(entrances[6]),
+            riseInStyle(entrances[7]),
           ]}
         >
           <DuoButton

@@ -1,6 +1,7 @@
 import React, { useMemo } from "react";
 import { View, Text, StyleSheet, TouchableOpacity, Platform } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { haptic } from "../services/feedback";
 import { radius, useTheme } from "../theme";
 
 const TABS = [
@@ -23,7 +24,10 @@ export default function BottomNavBar({ active, onNavigate }) {
           <TouchableOpacity
             key={tab.key}
             style={styles.tab}
-            onPress={() => onNavigate(tab.key)}
+            onPress={() => {
+              haptic.light();
+              onNavigate(tab.key);
+            }}
             activeOpacity={0.8}
           >
             <View style={[styles.iconWrap, isActive && styles.activeIconWrap]}>

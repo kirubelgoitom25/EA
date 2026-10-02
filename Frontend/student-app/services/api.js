@@ -155,18 +155,66 @@ export async function fetchStudent() {
 
 export async function fetchCourses() {
   const courses = await request("/courses");
-  return courses.map(mapCourse);
+  return Array.isArray(courses) ? courses.map(mapCourse) : [];
 }
 
-export async function fetchRanking() {
-  const rows = await request("/ranking");
-  return rows.map((row) => ({
-    id: row.id,
-    name: row.name,
-    xp: Number(row.xp),
-    weeklyXp: Number(row.weekly_xp),
-    monthlyXp: Number(row.monthly_xp),
-  }));
+export async function fetchRanking(scope = "class", period = "weekly") {
+  const result = await request(
+    `/ranking?scope=${encodeURIComponent(scope)}&period=${encodeURIComponent(period)}`
+  );
+  const sourceEntries = Array.isArray(result)
+    ? result
+    : Array.isArray(result?.entries)
+    ? result.entries
+    : [];
+  const numberOrZero = (value) => {
+    const number = Number(value);
+    return Number.isFinite(number) ? number : 0;
+  };
+  const entries = sourceEntries.map((row) => {
+    const xp = numberOrZero(row?.xp);
+    const weeklyXp = numberOrZero(row?.weekly_xp ?? row?.weeklyXp);
+    const monthlyXp = numberOrZero(row?.monthly_xp ?? row?.monthlyXp);
+    const periodXp = numberOrZero(
+      row?.period_xp ??
+        (period === "weekly"
+          ? weeklyXp
+          : period === "monthly"
+          ? monthlyXp
+          : xp)
+    );
+    return {
+      id: row?.id ?? "",
+      name: row?.name ?? "",
+      xp,
+      weeklyXp,
+      monthlyXp,
+      periodXp,
+      position: numberOrZero(row?.position),
+    };
+  });
+  const sessionResult = Array.isArray(result)
+    ? null
+    : result && typeof result === "object"
+    ? result
+    : null;
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+  const ownEntry = entries.find((entry) => entry.id === session?.user?.id);
+  const sortedEntries = [...entries].sort(
+    (a, b) => b.periodXp - a.periodXp || a.name.localeCompare(b.name)
+  );
+  const derivedPosition = ownEntry
+    ? sortedEntries.findIndex((entry) => entry.id === ownEntry.id) + 1
+    : null;
+  const responsePosition = numberOrZero(sessionResult?.your_position);
+  return {
+    entries,
+    yourPosition:
+      responsePosition || numberOrZero(ownEntry?.position) || derivedPosition,
+    yourXp: numberOrZero(sessionResult?.your_xp ?? ownEntry?.periodXp),
+  };
 }
 
 // ---- Quiz ----------------------------------------------------------------

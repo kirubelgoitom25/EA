@@ -1,5 +1,6 @@
 import React, { useMemo, useRef } from "react";
 import { Text, StyleSheet, Animated, Pressable } from "react-native";
+import { haptic } from "../services/feedback";
 import { radius, useTheme } from "../theme";
 
 const getVariants = (colors) => ({
@@ -19,6 +20,7 @@ export default function DuoButton({
   onPress,
   variant = "primary",
   disabled = false,
+  hapticEnabled = true,
   style,
   icon,
 }) {
@@ -55,7 +57,10 @@ export default function DuoButton({
 
   return (
     <Pressable
-      onPress={disabled ? undefined : onPress}
+      onPress={disabled || !onPress ? undefined : (event) => {
+        if (hapticEnabled) haptic.light();
+        onPress(event);
+      }}
       onPressIn={handlePressIn}
       onPressOut={handlePressOut}
       disabled={disabled}

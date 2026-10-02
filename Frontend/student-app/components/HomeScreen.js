@@ -12,6 +12,7 @@ import {
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
 
+import { haptic } from "../services/feedback";
 import { radius, useTheme } from "../theme";
 import BottomNavBar from "./BottomNavBar";
 import XpProgressRing from "./XpProgressRing";
@@ -119,7 +120,7 @@ function ScalePressable({
 
   return (
     <Pressable
-      onPress={onPress}
+      onPress={onPress ? (event) => { haptic.light(); onPress(event); } : undefined}
       onPressIn={handlePressIn}
       onPressOut={handlePressOut}
       hitSlop={hitSlop}
@@ -150,11 +151,178 @@ const getCourseVisual = (title = "", colors) => {
 
 const getNextLessonTitle = (course) => {
   for (const module of course.modules || []) {
-    const next = module.lessons.find((lesson) => !lesson.completed);
+    const next = (module.lessons || []).find((lesson) => !lesson.completed);
     if (next) return next.title;
   }
   return null;
 };
+
+// When the learner last worked on a course (ms since epoch, 0 = unknown).
+// Uses a course-level timestamp if the API sends one, otherwise the newest
+// lesson completedAt. Used to resume the course they were on most recently.
+const toTime = (value) => {
+  const time = value ? new Date(value).getTime() : 0;
+  return Number.isNaN(time) ? 0 : time;
+};
+
+const getLastActivity = (course) => {
+  const courseTime = Math.max(
+    toTime(course.lastAccessedAt),
+    toTime(course.lastStudiedAt),
+    toTime(course.lastActivityAt)
+  );
+  const lessonTime = (course.modules || []).reduce(
+    (latest, module) =>
+      (module.lessons || []).reduce(
+        (inner, lesson) => Math.max(inner, toTime(lesson.completedAt)),
+        latest
+      ),
+    0
+  );
+  return Math.max(courseTime, lessonTime);
+};
+
+/**
+ * The lesson the learner is currently taking, shown first on the home page.
+ *
+ * Zero-reading design: one huge play button is the whole message. Soft rings
+ * ripple out of it (the universal "press me" signal), then pause. The only
+ * words are the lesson title and a thin progress bar. The whole card is the
+ * tap target.
+ */
+function ResumeLessonCard({ course, lessonTitle, styles, onPress }) {
+  const ripple = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(ripple, {
+          toValue: 1,
+          duration: 1700,
+          easing: Easing.out(Easing.quad),
+          useNativeDriver: true,
+        }),
+        Animated.timing(ripple, {
+          toValue: 0,
+          duration: 0,
+          useNativeDriver: true,
+        }),
+        Animated.delay(700),
+      ]),
+    );
+
+    loop.start();
+
+    return () => loop.stop();
+  }, [ripple]);
+
+  // Second ring trails the first so the pulse reads as a wave.
+  const ringOne = {
+    opacity: ripple.interpolate({ inputRange: [0, 1], outputRange: [0.35, 0] }),
+    transform: [
+      { scale: ripple.interpolate({ inputRange: [0, 1], outputRange: [1, 1.45] }) },
+    ],
+  };
+  const ringTwo = {
+    opacity: ripple.interpolate({ inputRange: [0, 0.3, 1], outputRange: [0, 0.3, 0] }),
+    transform: [
+      { scale: ripple.interpolate({ inputRange: [0, 0.3, 1], outputRange: [1, 1, 1.45] }) },
+    ],
+  };
+
+  return (
+    <ScalePressable
+      wrapperStyle={styles.resumeSlot}
+      style={styles.resumeCard}
+      onPress={onPress}
+      accessibilityLabel={`Continue ${lessonTitle || course.title}`}
+    >
+      <View style={styles.resumePlayWrap}>
+        <Animated.View pointerEvents="none" style={[styles.resumeRing, ringOne]} />
+        <Animated.View pointerEvents="none" style={[styles.resumeRing, ringTwo]} />
+        <View style={styles.resumePlay}>
+          <Ionicons name="play" size={30} color="#fff" style={styles.resumePlayIcon} />
+        </View>
+      </View>
+
+      <View style={styles.resumeBody}>
+        <Text style={styles.resumeLabel}>
+          {course.progress > 0 ? "Continue" : "Start"}
+        </Text>
+        <Text style={styles.resumeTitle} numberOfLines={2}>
+          {lessonTitle || course.title}
+        </Text>
+        <View style={styles.resumeTrack}>
+          <View
+            style={[styles.resumeFill, { width: `${course.progress}%` }]}
+          />
+        </View>
+      </View>
+    </ScalePressable>
+  );
+}
+
+/**
+ * One day in the "Your rhythm" week row.
+ * - filled days get a flame and pop in one after another
+ * - consecutive filled days are joined by a soft bar, so a streak reads as a chain
+ * - today is outlined (and its letter highlighted) so the week has an anchor
+ */
+function WeekDay({ label, index, filled, isToday, linkedLeft, linkedRight, colors, styles }) {
+  const pop = useRef(new Animated.Value(filled ? 0 : 1)).current;
+
+  useEffect(() => {
+    if (!filled) return undefined;
+
+    const animation = Animated.sequence([
+      Animated.delay(350 + index * 70),
+      Animated.spring(pop, {
+        toValue: 1,
+        speed: 16,
+        bounciness: 10,
+        useNativeDriver: true,
+      }),
+    ]);
+
+    animation.start();
+
+    return () => animation.stop();
+  }, [filled, index, pop]);
+
+  return (
+    <View style={styles.dayColumn}>
+      <View style={styles.dayTrack}>
+        {linkedLeft && <View style={[styles.dayLink, styles.dayLinkLeft]} />}
+        {linkedRight && <View style={[styles.dayLink, styles.dayLinkRight]} />}
+        <Animated.View
+          style={[
+            styles.dayCircle,
+            isToday && styles.dayCircleToday,
+            filled && styles.dayCircleFilled,
+            {
+              opacity: pop,
+              transform: [
+                {
+                  scale: pop.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [0.5, 1],
+                  }),
+                },
+              ],
+            },
+          ]}
+        >
+          {filled ? (
+            <Ionicons name="flame" size={15} color="#fff" />
+          ) : isToday ? (
+            <View style={styles.todayDot} />
+          ) : null}
+        </Animated.View>
+      </View>
+      <Text style={[styles.dayLabel, isToday && styles.dayLabelToday]}>{label}</Text>
+    </View>
+  );
+}
 
 const useCountUp = (target, duration = 600) => {
   const [value, setValue] = useState(target);
@@ -219,9 +387,9 @@ function StreakFlame({ size = 16 }) {
 }
 
 export default function HomeScreen({
-  ranking,
+  ranking = [],
   user,
-  courses,
+  courses = [],
   onProfile,
   onCourses,
   onRanking,
@@ -232,6 +400,7 @@ export default function HomeScreen({
   const animatedXp = useCountUp(Number(user.xp) || 0);
   const [activeCourseIndex, setActiveCourseIndex] = useState(0);
   const headerEntrance = useRef(new Animated.Value(0)).current;
+  const resumeEntrance = useRef(new Animated.Value(0)).current;
   const heroEntrance = useRef(new Animated.Value(0)).current;
   const statsEntrance = useRef(new Animated.Value(0)).current;
   const learningEntrance = useRef(new Animated.Value(0)).current;
@@ -240,17 +409,30 @@ export default function HomeScreen({
   useEffect(() => {
     Animated.stagger(
       55,
-      [headerEntrance, heroEntrance, statsEntrance, learningEntrance, rankingEntrance].map(
-        (value) =>
-          Animated.timing(value, {
-            toValue: 1,
-            duration: 280,
-            easing: Easing.out(Easing.cubic),
-            useNativeDriver: true,
-          })
+      [
+        headerEntrance,
+        resumeEntrance,
+        heroEntrance,
+        statsEntrance,
+        learningEntrance,
+        rankingEntrance,
+      ].map((value) =>
+        Animated.timing(value, {
+          toValue: 1,
+          duration: 280,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: true,
+        })
       )
     ).start();
-  }, [headerEntrance, heroEntrance, learningEntrance, rankingEntrance, statsEntrance]);
+  }, [
+    headerEntrance,
+    resumeEntrance,
+    heroEntrance,
+    learningEntrance,
+    rankingEntrance,
+    statsEntrance,
+  ]);
 
   const leaderboard = useMemo(() => {
     const others = ranking
@@ -275,7 +457,28 @@ export default function HomeScreen({
   const continueLearningCourses =
     inProgressCourses.length > 0 ? inProgressCourses : courses;
 
-  const filledDaysFromEnd = Math.min(user.streak ?? 0, 7);
+  // The course the learner was on last: the most recently studied started
+  // course first (list order breaks ties), then the first unfinished one.
+  // Nothing is shown when everything is complete.
+  const startedCourses = courses.filter(
+    (course) => course.progress > 0 && course.progress < 100
+  );
+  const resumeCourse =
+    [...startedCourses].sort((a, b) => getLastActivity(b) - getLastActivity(a))[0] ||
+    courses.find((course) => course.progress < 100) ||
+    null;
+  const resumeLessonTitle = resumeCourse
+    ? getNextLessonTitle(resumeCourse)
+    : null;
+
+  // Your rhythm: the streak is counted back from today inside the current
+  // week (Monday first), so the filled days line up with the real weekdays.
+  const todayIndex = (new Date().getDay() + 6) % 7;
+  const streakDays = Math.max(Number(user.streak) || 0, 0);
+  const filledDays = WEEK_DAYS.map(
+    (_, index) => index <= todayIndex && index > todayIndex - streakDays
+  );
+  const filledCount = filledDays.filter(Boolean).length;
   const todayLabel = new Intl.DateTimeFormat("en-US", {
     weekday: "short",
     month: "short",
@@ -310,6 +513,17 @@ export default function HomeScreen({
           </ScalePressable>
         </View>
         </Animated.View>
+
+        {resumeCourse && (
+          <Animated.View style={riseInStyle(resumeEntrance)}>
+            <ResumeLessonCard
+              course={resumeCourse}
+              lessonTitle={resumeLessonTitle}
+              styles={styles}
+              onPress={() => onSelectCourse(resumeCourse)}
+            />
+          </Animated.View>
+        )}
 
         <Animated.View style={riseInStyle(heroEntrance)}>
         <LinearGradient
@@ -375,21 +589,26 @@ export default function HomeScreen({
         <View style={styles.sectionCard}>
           <View style={styles.sectionHeaderRow}>
             <Text style={styles.sectionTitle}>YOUR RHYTHM</Text>
-            <Text style={styles.sectionMeta}>{user.streak ?? 0} days</Text>
+            <View style={styles.rhythmPill}>
+              <Ionicons name="flame" size={12} color={colors.orangeDeep} />
+              <Text style={styles.rhythmPillText}>{filledCount} / 7 this week</Text>
+            </View>
           </View>
 
           <View style={styles.weekRow}>
-            {WEEK_DAYS.map((label, index) => {
-              const isFilled = index >= 7 - filledDaysFromEnd;
-              return (
-                <View key={index} style={styles.dayColumn}>
-                  <View style={[styles.dayCircle, isFilled && styles.dayCircleFilled]}>
-                    {isFilled && <Ionicons name="flame" size={12} color="#fff" />}
-                  </View>
-                  <Text style={styles.dayLabel}>{label}</Text>
-                </View>
-              );
-            })}
+            {WEEK_DAYS.map((label, index) => (
+              <WeekDay
+                key={index}
+                label={label}
+                index={index}
+                filled={filledDays[index]}
+                isToday={index === todayIndex}
+                linkedLeft={filledDays[index] && !!filledDays[index - 1]}
+                linkedRight={filledDays[index] && !!filledDays[index + 1]}
+                colors={colors}
+                styles={styles}
+              />
+            ))}
           </View>
         </View>
         </Animated.View>
@@ -619,6 +838,72 @@ const createStyles = (colors) => StyleSheet.create({
     fontSize: 16,
   },
 
+  // Current-lesson card (top of the page)
+  resumeSlot: { marginBottom: 18 },
+  resumeCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: colors.orangeLight,
+    borderRadius: radius.xl,
+    padding: 16,
+    borderWidth: 2,
+    borderColor: colors.orange,
+    borderBottomWidth: 4,
+    borderBottomColor: colors.orangeDeep,
+  },
+  resumePlayWrap: {
+    width: 68,
+    height: 68,
+    marginRight: 16,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  resumeRing: {
+    position: "absolute",
+    width: 68,
+    height: 68,
+    borderRadius: 34,
+    backgroundColor: colors.orange,
+  },
+  resumePlay: {
+    width: 68,
+    height: 68,
+    borderRadius: 34,
+    backgroundColor: colors.orange,
+    alignItems: "center",
+    justifyContent: "center",
+    borderBottomWidth: 5,
+    borderBottomColor: colors.orangeDeep,
+  },
+  // optical centering: a play triangle looks off-centre without a nudge
+  resumePlayIcon: { marginLeft: 3 },
+  resumeBody: { flex: 1 },
+  resumeLabel: {
+    fontSize: 13,
+    fontWeight: "800",
+    color: colors.orangeDeep,
+    marginBottom: 2,
+  },
+  resumeTitle: {
+    fontSize: 20,
+    lineHeight: 26,
+    fontWeight: "800",
+    color: colors.text,
+    letterSpacing: -0.3,
+  },
+  resumeTrack: {
+    height: 8,
+    borderRadius: 999,
+    backgroundColor: colors.card,
+    overflow: "hidden",
+    marginTop: 10,
+  },
+  resumeFill: {
+    height: "100%",
+    borderRadius: 999,
+    backgroundColor: colors.orange,
+  },
+
   heroCard: { borderRadius: radius.xl, padding: 18, marginBottom: 18, borderBottomWidth: 5, borderBottomColor: colors.orangeDeep },
   heroTopRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 8 },
   heroEyebrow: { color: "rgba(255,255,255,0.8)", fontSize: 11, fontWeight: "800", letterSpacing: 1, marginBottom: 6 },
@@ -645,11 +930,22 @@ const createStyles = (colors) => StyleSheet.create({
   sectionTitle: { fontSize: 18, fontWeight: "800", color: colors.text, letterSpacing: 0.4 },
   sectionMeta: { fontSize: 12, color: colors.orangeDeep, fontWeight: "800" },
 
-  weekRow: { flexDirection: "row", justifyContent: "space-between" },
-  dayColumn: { alignItems: "center", gap: 8 },
-  dayCircle: { width: 32, height: 32, borderRadius: 16, backgroundColor: colors.bgSecondary, borderWidth: 1, borderColor: colors.border, alignItems: "center", justifyContent: "center" },
-  dayCircleFilled: { backgroundColor: colors.orange, borderColor: colors.orange },
+  // Your rhythm
+  rhythmPill: { flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: colors.orangeLight, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 5 },
+  rhythmPillText: { fontSize: 12, color: colors.orangeDeep, fontWeight: "800" },
+  weekRow: { flexDirection: "row" },
+  dayColumn: { flex: 1, alignItems: "center", gap: 8 },
+  // Track holds the circle plus the half-bars that join consecutive filled days
+  dayTrack: { width: "100%", height: 34, alignItems: "center", justifyContent: "center" },
+  dayLink: { position: "absolute", top: 14, height: 6, width: "50%", backgroundColor: colors.orangeLight },
+  dayLinkLeft: { left: 0 },
+  dayLinkRight: { right: 0 },
+  dayCircle: { width: 34, height: 34, borderRadius: 17, backgroundColor: colors.bgSecondary, borderWidth: 1, borderColor: colors.border, alignItems: "center", justifyContent: "center" },
+  dayCircleToday: { backgroundColor: colors.card, borderWidth: 2, borderColor: colors.orange },
+  dayCircleFilled: { backgroundColor: colors.orange, borderWidth: 1, borderColor: colors.orangeDeep, borderBottomWidth: 3 },
+  todayDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: colors.orange },
   dayLabel: { fontSize: 11, fontWeight: "700", color: colors.textMuted },
+  dayLabelToday: { color: colors.orangeDeep, fontWeight: "800" },
 
   carousel: { paddingRight: 16, paddingBottom: 8 },
   // width + margin moved here (outer slot); courseCard is now the pressable surface inside it

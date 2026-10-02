@@ -1,7 +1,7 @@
 {
   "expo": {
-    "name": "student-app",
-    "slug": "student-app",
+    "name": "EA",
+    "slug": "EA",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.jpg",
@@ -22,7 +22,8 @@
     },
     "plugins": [
       "expo-sqlite",
-      "expo-secure-store"
+      "expo-secure-store",
+      "expo-audio"
     ]
   }
 }

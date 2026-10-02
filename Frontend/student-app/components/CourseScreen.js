@@ -8,6 +8,7 @@ import {
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 
+import { haptic } from "../services/feedback";
 import { radius, useTheme } from "../theme";
 import BottomNavBar from "./BottomNavBar";
 
@@ -30,7 +31,7 @@ export default function CourseScreen({
     <View style={styles.root}>
       <ScrollView style={styles.container} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
         <View style={styles.header}>
-          <TouchableOpacity onPress={onBack} activeOpacity={0.7} style={styles.backButton}>
+          <TouchableOpacity onPress={() => { haptic.light(); onBack(); }} activeOpacity={0.7} style={styles.backButton}>
             <Ionicons name="chevron-back" size={22} color={colors.text} />
             <Text style={styles.backText}>Courses</Text>
           </TouchableOpacity>
@@ -92,7 +93,7 @@ export default function CourseScreen({
                       <TouchableOpacity
                         activeOpacity={0.8}
                         disabled={isLocked}
-                        onPress={() => onSelectLesson(lesson)}
+                        onPress={() => { haptic.light(); onSelectLesson(lesson); }}
                         style={[styles.node, isCompleted && styles.nodeCompleted, isCurrent && styles.nodeCurrent, isLocked && styles.nodeLocked]}
                       >
                         {isCompleted ? (
@@ -108,7 +109,7 @@ export default function CourseScreen({
                     <TouchableOpacity
                       activeOpacity={0.75}
                       disabled={isLocked}
-                      onPress={() => onSelectLesson(lesson)}
+                      onPress={() => { haptic.light(); onSelectLesson(lesson); }}
                       style={[styles.lessonCard, isCurrent && styles.lessonCardCurrent, isLocked && styles.lessonCardLocked]}
                     >
                       <View style={styles.lessonText}>

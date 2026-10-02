@@ -20,6 +20,7 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 
 import { fetchPracticeByLessonId, submitPractice } from "../services/api";
+import { feedback, haptic } from "../services/feedback";
 import { radius, useTheme } from "../theme";
 import BottomNavBar from "./BottomNavBar";
 import DuoButton from "./DuoButton";
@@ -86,6 +87,142 @@ const getAnswerLabel = (activity) => {
   }
   return activity.answer;
 };
+
+// Duolingo-style feedback wrapper.
+// state === "correct": the element hops up and down a few times.
+// state === "wrong": the element shakes side to side.
+function FeedbackAnim({ state, children, style }) {
+  const hop = useRef(new Animated.Value(0)).current;
+  const shake = useRef(new Animated.Value(0)).current;
+  const grow = useRef(new Animated.Value(1)).current;
+
+  useEffect(() => {
+    if (state === "correct") {
+      hop.setValue(0);
+      grow.setValue(1);
+      Animated.parallel([
+        Animated.sequence([
+          Animated.timing(hop, {
+            toValue: -16,
+            duration: 130,
+            easing: Easing.out(Easing.quad),
+            useNativeDriver: true,
+          }),
+          Animated.timing(hop, {
+            toValue: 0,
+            duration: 130,
+            easing: Easing.in(Easing.quad),
+            useNativeDriver: true,
+          }),
+          Animated.timing(hop, {
+            toValue: -8,
+            duration: 100,
+            easing: Easing.out(Easing.quad),
+            useNativeDriver: true,
+          }),
+          Animated.timing(hop, {
+            toValue: 0,
+            duration: 100,
+            easing: Easing.in(Easing.quad),
+            useNativeDriver: true,
+          }),
+          Animated.timing(hop, {
+            toValue: -3,
+            duration: 70,
+            easing: Easing.out(Easing.quad),
+            useNativeDriver: true,
+          }),
+          Animated.timing(hop, {
+            toValue: 0,
+            duration: 70,
+            easing: Easing.in(Easing.quad),
+            useNativeDriver: true,
+          }),
+        ]),
+        Animated.sequence([
+          Animated.timing(grow, {
+            toValue: 1.04,
+            duration: 130,
+            useNativeDriver: true,
+          }),
+          Animated.spring(grow, {
+            toValue: 1,
+            speed: 14,
+            bounciness: 10,
+            useNativeDriver: true,
+          }),
+        ]),
+      ]).start();
+    } else if (state === "wrong") {
+      shake.setValue(0);
+      Animated.sequence([
+        Animated.timing(shake, {
+          toValue: 1,
+          duration: 45,
+          useNativeDriver: true,
+        }),
+        Animated.timing(shake, {
+          toValue: -1,
+          duration: 70,
+          useNativeDriver: true,
+        }),
+        Animated.timing(shake, {
+          toValue: 0.6,
+          duration: 60,
+          useNativeDriver: true,
+        }),
+        Animated.timing(shake, {
+          toValue: 0,
+          duration: 60,
+          useNativeDriver: true,
+        }),
+      ]).start();
+    }
+  }, [state, hop, shake, grow]);
+
+  return (
+    <Animated.View
+      style={[
+        style,
+        {
+          transform: [
+            { translateY: hop },
+            {
+              translateX: shake.interpolate({
+                inputRange: [-1, 1],
+                outputRange: [-6, 6],
+              }),
+            },
+            { scale: grow },
+          ],
+        },
+      ]}
+    >
+      {children}
+    </Animated.View>
+  );
+}
+
+// Icon that springs in from nothing.
+function PopIcon({ name, color }) {
+  const scale = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    scale.setValue(0);
+    Animated.spring(scale, {
+      toValue: 1,
+      speed: 14,
+      bounciness: 16,
+      useNativeDriver: true,
+    }).start();
+  }, [scale]);
+
+  return (
+    <Animated.View style={{ transform: [{ scale }] }}>
+      <Ionicons name={name} size={22} color={color} />
+    </Animated.View>
+  );
+}
 
 // Same look as the quiz explanation: muted box, info icon, soft entrance.
 function ExplanationBox({ text, styles, colors }) {
@@ -212,7 +349,7 @@ export default function PracticeScreen({
             style={styles.mainButton}
           />
 
-          <TouchableOpacity onPress={onBack}>
+          <TouchableOpacity onPress={() => { haptic.light(); onBack(); }}>
             <Text style={styles.backButton}>← Back to Lesson</Text>
           </TouchableOpacity>
         </View>
@@ -226,7 +363,7 @@ export default function PracticeScreen({
         <View style={styles.emptyContainer}>
           <Text style={styles.title}>Practice coming soon</Text>
 
-          <TouchableOpacity onPress={onBack}>
+          <TouchableOpacity onPress={() => { haptic.light(); onBack(); }}>
             <Text style={styles.backButton}>← Back to Lesson</Text>
           </TouchableOpacity>
         </View>
@@ -281,6 +418,7 @@ export default function PracticeScreen({
     if (checked) {
       return;
     }
+    feedback.button();
     setAnswers((current) => ({ ...current, [activity.id]: optionIndex }));
   };
 
@@ -301,6 +439,7 @@ export default function PracticeScreen({
         xpEarned: result.xpEarned,
         xpPossible: result.xpPossible,
       });
+      feedback.complete({ xp: result.xpEarned });
 
       if (onComplete) {
         onComplete();
@@ -331,7 +470,20 @@ export default function PracticeScreen({
 
     if (!checked && keyKnown) {
       setChecked(true);
+      if (isCorrect()) {
+        feedback.correct();
+      } else {
+        feedback.wrong();
+      }
       return;
+    }
+
+    // No answer key (or already checked): play a click so the button
+    // still gives audio feedback.
+    if (!keyKnown) {
+      feedback.button();
+    } else if (!isLast) {
+      haptic.light();
     }
 
     goNextOrFinish();
@@ -423,7 +575,7 @@ export default function PracticeScreen({
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
-        <TouchableOpacity onPress={onBack}>
+        <TouchableOpacity onPress={() => { haptic.light(); onBack(); }}>
           <Text style={styles.backButton}>← Lesson</Text>
         </TouchableOpacity>
 
@@ -491,80 +643,80 @@ export default function PracticeScreen({
               const showSelected = !checked && isSelected;
 
               return (
-                <TouchableOpacity
-                  key={optionIndex}
-                  style={[
-                    styles.option,
-                    showSelected && styles.selectedOption,
-                    showCorrect && styles.correctOption,
-                    showIncorrect && styles.incorrectOption,
-                  ]}
-                  onPress={() => handleChooseAnswer(optionIndex)}
-                  disabled={checked}
-                  accessibilityRole="button"
-                  accessibilityState={{ selected: isSelected }}
+                <FeedbackAnim
+                  key={`${activity.id}-${optionIndex}`}
+                  state={
+                    showCorrect ? "correct" : showIncorrect ? "wrong" : null
+                  }
                 >
-                  <View
+                  <TouchableOpacity
                     style={[
-                      styles.optionLetter,
-                      showSelected && styles.optionLetterSelected,
+                      styles.option,
+                      showSelected && styles.selectedOption,
+                      showCorrect && styles.correctOption,
+                      showIncorrect && styles.incorrectOption,
                     ]}
+                    onPress={() => handleChooseAnswer(optionIndex)}
+                    disabled={checked}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: isSelected }}
                   >
-                    <Text
+                    <View
                       style={[
-                        styles.optionLetterText,
-                        showSelected && styles.optionLetterTextSelected,
+                        styles.optionLetter,
+                        showSelected && styles.optionLetterSelected,
                       ]}
                     >
-                      {String.fromCharCode(65 + optionIndex)}
+                      <Text
+                        style={[
+                          styles.optionLetterText,
+                          showSelected && styles.optionLetterTextSelected,
+                        ]}
+                      >
+                        {String.fromCharCode(65 + optionIndex)}
+                      </Text>
+                    </View>
+
+                    <Text
+                      style={[
+                        styles.optionText,
+                        (showSelected || showCorrect || showIncorrect) &&
+                          styles.selectedOptionText,
+                      ]}
+                    >
+                      {option}
                     </Text>
-                  </View>
 
-                  <Text
-                    style={[
-                      styles.optionText,
-                      (showSelected || showCorrect || showIncorrect) &&
-                        styles.selectedOptionText,
-                    ]}
-                  >
-                    {option}
-                  </Text>
+                    {showCorrect && (
+                      <PopIcon name="checkmark-circle" color={colors.green} />
+                    )}
 
-                  {showCorrect && (
-                    <Ionicons
-                      name="checkmark-circle"
-                      size={22}
-                      color={colors.green}
-                    />
-                  )}
-
-                  {showIncorrect && (
-                    <Ionicons
-                      name="close-circle"
-                      size={22}
-                      color={colors.red}
-                    />
-                  )}
-                </TouchableOpacity>
+                    {showIncorrect && (
+                      <PopIcon name="close-circle" color={colors.red} />
+                    )}
+                  </TouchableOpacity>
+                </FeedbackAnim>
               );
             })
           ) : (
-            <TextInput
-              style={[
-                styles.input,
-                correct && styles.correctInput,
-                wrong && styles.wrongInput,
-              ]}
-              placeholder="Type your answer"
-              placeholderTextColor="#999"
-              value={typeof userAnswer === "string" ? userAnswer : ""}
-              onChangeText={handleTextAnswer}
-              editable={!checked}
-              autoCapitalize="none"
-              autoCorrect={false}
-              returnKeyType="done"
-              onSubmitEditing={handlePrimaryPress}
-            />
+            <FeedbackAnim state={correct ? "correct" : wrong ? "wrong" : null}>
+              <TextInput
+                style={[
+                  styles.input,
+                  correct && styles.correctInput,
+                  wrong && styles.wrongInput,
+                ]}
+                placeholder="Type your answer"
+                placeholderTextColor="#999"
+                value={typeof userAnswer === "string" ? userAnswer : ""}
+                onChangeText={handleTextAnswer}
+                editable={!checked}
+                autoCapitalize="none"
+                autoCorrect={false}
+                returnKeyType="done"
+                onSubmitEditing={handlePrimaryPress}
+              />
+            </FeedbackAnim>
           )}
 
           {correct && <Text style={styles.correctText}>Correct!</Text>}
@@ -583,6 +735,7 @@ export default function PracticeScreen({
           variant="primary"
           disabled={!hasAnswer || submitting}
           onPress={handlePrimaryPress}
+          hapticEnabled={false}
           style={styles.mainButton}
         />
       </ScrollView>
