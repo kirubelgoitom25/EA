@@ -249,3 +249,9 @@ class ClassCourse(Base):
     class_id = Column(String, ForeignKey("classes.id", ondelete="CASCADE"), primary_key=True)
     course_id = Column(String, ForeignKey("courses.id", ondelete="CASCADE"), primary_key=True)
     
+    
+class ClassTeacher(Base):
+    __tablename__ = "class_teachers"
+
+    class_id = Column(String, ForeignKey("classes.id", ondelete="CASCADE"), primary_key=True)
+    teacher_id = Column(UUID(as_uuid=True), ForeignKey("profiles.id", ondelete="CASCADE"), primary_key=True)

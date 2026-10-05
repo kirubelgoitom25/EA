@@ -3,7 +3,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from app.routers import auth, courses, practice, quiz, stats, students
+from app.routers import auth, classes, courses, practice, quiz, stats, students
 from fastapi import Depends, FastAPI, Request
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -50,6 +50,7 @@ app.include_router(courses.router)
 app.include_router(quiz.router)
 app.include_router(practice.router)
 app.include_router(stats.router)
+app.include_router(classes.router)
 
 
 @app.get("/health")

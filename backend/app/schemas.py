@@ -139,3 +139,21 @@ class RankingEntryOut(BaseModel):
     xp: Decimal
     weekly_xp: Decimal
     monthly_xp: Decimal
+
+class ClassOut(BaseModel):
+    id: str
+    name: str
+    student_count: int
+
+
+class StudentProgressCourseOut(BaseModel):
+    id: str
+    title: str
+    progress: int
+
+
+class StudentDetailOut(StudentOut):
+    class_id: Optional[str] = None
+    xp: Decimal
+    current_streak: int
+    courses: list[StudentProgressCourseOut]
