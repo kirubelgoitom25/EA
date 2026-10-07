@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.deps import require_teacher
 from app.schemas import StudentDetailOut, StudentOut
+from app.course_activity import current_courses_for_class
 
 router = APIRouter(prefix="/students", tags=["students"])
 
@@ -190,6 +191,8 @@ def get_student(
             }
         )
 
+    current_course = current_courses_for_class(db, row["class_id"]).get(me)
+
     return {
         "id": str(row["id"]),
         "name": row["name"],
@@ -201,4 +204,5 @@ def get_student(
         "xp": stats["xp"],
         "current_streak": current_streak,
         "courses": courses_out,
+        "current_course": current_course,
     }
