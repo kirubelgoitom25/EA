@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { Users } from "lucide-react";
+import { Link } from "react-router-dom";
+import { ChevronRight, Users } from "lucide-react";
 import { api } from "../lib/api.js";
 
 export default function Classes() {
@@ -53,13 +54,20 @@ export default function Classes() {
       {classes && classes.length > 0 && (
         <div className="grid">
           {classes.map((c) => (
-            <section className="card class-card" key={c.id}>
+            <Link
+              className="card class-card class-link"
+              to={`/classes/${encodeURIComponent(c.id)}`}
+              key={c.id}
+            >
               <h2>{c.name}</h2>
-              <span className="pill num">
-                <Users size={13} />
-                {c.student_count} students
-              </span>
-            </section>
+              <div className="class-card-foot">
+                <span className="pill num">
+                  <Users size={13} />
+                  {c.student_count} students
+                </span>
+                <ChevronRight size={20} className="chev" />
+              </div>
+            </Link>
           ))}
         </div>
       )}
