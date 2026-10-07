@@ -150,6 +150,11 @@ class StudentProgressCourseOut(BaseModel):
     id: str
     title: str
     progress: int
+    total_lessons: int
+    completed_lessons: int
+    xp: Decimal
+    rank: Optional[int] = None
+    class_size: int
 
 
 class StudentDetailOut(StudentOut):
@@ -157,3 +162,22 @@ class StudentDetailOut(StudentOut):
     xp: Decimal
     current_streak: int
     courses: list[StudentProgressCourseOut]
+    
+
+class ClassStudentOut(BaseModel):
+    id: str
+    name: str
+    is_active: bool
+    xp: Decimal
+    weekly_xp: Decimal
+    monthly_xp: Decimal
+    current_streak: int
+    progress: int
+    last_active_at: Optional[datetime] = None
+
+
+class ClassCourseOut(BaseModel):
+    id: str
+    title: str
+    total_lessons: int
+    avg_progress: int
