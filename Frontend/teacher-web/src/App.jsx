@@ -6,10 +6,12 @@ import {
   Outlet,
 } from "react-router-dom";
 import { AuthProvider, useAuth } from "./auth/AuthContext.jsx";
+import LoadingScreen from "./components/LoadingScreen.jsx";
 import Shell from "./components/Shell.jsx";
 import Login from "./pages/Login.jsx";
-import LoadingScreen from "./components/LoadingScreen.jsx";
 import Classes from "./pages/Classes.jsx";
+import ClassPage from "./pages/ClassPage.jsx";
+import StudentPage from "./pages/StudentPage.jsx";
 import "./App.css";
 
 // The route guard is for convenience only. The backend checks the token on every request.
@@ -28,7 +30,10 @@ export default function App() {
           <Route path="/login" element={<Login />} />
           <Route element={<Protected />}>
             <Route element={<Shell />}>
-              <Route path="/" element={<Classes />} />
+              <Route path="/" element={<Navigate to="/classes" replace />} />
+              <Route path="/classes" element={<Classes />} />
+              <Route path="/classes/:classId" element={<ClassPage />} />
+              <Route path="/students/:studentId" element={<StudentPage />} />
             </Route>
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />

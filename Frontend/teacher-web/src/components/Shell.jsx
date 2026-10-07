@@ -1,9 +1,12 @@
-import { NavLink, Outlet } from "react-router-dom";
+import { Link, Outlet, useLocation } from "react-router-dom";
 import { LayoutGrid, LogOut } from "lucide-react";
 import { useAuth } from "../auth/AuthContext.jsx";
 
 export default function Shell() {
   const { signOut } = useAuth();
+  const { pathname } = useLocation();
+  const classesActive =
+    pathname.startsWith("/classes") || pathname.startsWith("/students");
 
   return (
     <div className="shell">
@@ -13,10 +16,13 @@ export default function Shell() {
           <span>Teachers</span>
         </div>
         <nav>
-          <NavLink to="/" end className="nav-item">
+          <Link
+            to="/classes"
+            className={`nav-item${classesActive ? " active" : ""}`}
+          >
             <LayoutGrid size={20} />
             <span>Classes</span>
-          </NavLink>
+          </Link>
         </nav>
         <button className="nav-item" onClick={signOut}>
           <LogOut size={20} />
