@@ -63,7 +63,11 @@ const normalizeActivity = (raw) => {
     "correct_index",
   ]);
 
-  if (raw.type === "choose" && typeof answer === "string" && /^\d+$/.test(answer)) {
+  if (
+    raw.type === "choose" &&
+    typeof answer === "string" &&
+    /^\d+$/.test(answer)
+  ) {
     answer = Number(answer);
   }
 
@@ -255,11 +259,7 @@ function ExplanationBox({ text, styles, colors }) {
         },
       ]}
     >
-      <Ionicons
-        name="information-circle"
-        size={18}
-        color={colors.textMuted}
-      />
+      <Ionicons name="information-circle" size={18} color={colors.textMuted} />
       <Text style={styles.explanationText}>{text}</Text>
     </Animated.View>
   );
@@ -349,7 +349,12 @@ export default function PracticeScreen({
             style={styles.mainButton}
           />
 
-          <TouchableOpacity onPress={() => { haptic.light(); onBack(); }}>
+          <TouchableOpacity
+            onPress={() => {
+              haptic.light();
+              onBack();
+            }}
+          >
             <Text style={styles.backButton}>← Back to Lesson</Text>
           </TouchableOpacity>
         </View>
@@ -363,7 +368,12 @@ export default function PracticeScreen({
         <View style={styles.emptyContainer}>
           <Text style={styles.title}>Practice coming soon</Text>
 
-          <TouchableOpacity onPress={() => { haptic.light(); onBack(); }}>
+          <TouchableOpacity
+            onPress={() => {
+              haptic.light();
+              onBack();
+            }}
+          >
             <Text style={styles.backButton}>← Back to Lesson</Text>
           </TouchableOpacity>
         </View>
@@ -374,8 +384,7 @@ export default function PracticeScreen({
   const activities = practice.activities.map(normalizeActivity);
   const total = activities.length;
   const activity = activities[currentIndex];
-  console.log("PRACTICE ACTIVITY:", activity);
-  console.log("PRACTICE EXPLANATION:", activity.explanation);
+
   const isLast = currentIndex === total - 1;
 
   const userAnswer = answers[activity.id];
@@ -575,7 +584,12 @@ export default function PracticeScreen({
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
-        <TouchableOpacity onPress={() => { haptic.light(); onBack(); }}>
+        <TouchableOpacity
+          onPress={() => {
+            haptic.light();
+            onBack();
+          }}
+        >
           <Text style={styles.backButton}>← Lesson</Text>
         </TouchableOpacity>
 

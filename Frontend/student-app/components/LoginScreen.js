@@ -29,8 +29,10 @@ export default function LoginScreen({ onLogin }) {
 
   // Track the keyboard so the layout can shrink while it is open.
   useEffect(() => {
-    const showEvent = Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
-    const hideEvent = Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
+    const showEvent =
+      Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
+    const hideEvent =
+      Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
 
     const showSub = Keyboard.addListener(showEvent, () => {
       setKeyboardVisible(true);
@@ -38,7 +40,9 @@ export default function LoginScreen({ onLogin }) {
       // so the button and both fields stay visible.
       setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 100);
     });
-    const hideSub = Keyboard.addListener(hideEvent, () => setKeyboardVisible(false));
+    const hideSub = Keyboard.addListener(hideEvent, () =>
+      setKeyboardVisible(false),
+    );
 
     return () => {
       showSub.remove();
@@ -171,7 +175,7 @@ export default function LoginScreen({ onLogin }) {
 
         {!keyboardVisible && (
           <Text style={styles.footerText}>
-            New here? Your account is created automatically for now.
+            New here? Ask your teacher to create an account for you.
           </Text>
         )}
       </ScrollView>
@@ -179,175 +183,176 @@ export default function LoginScreen({ onLogin }) {
   );
 }
 
-const createStyles = (colors) => StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: colors.screenBg,
-  },
+const createStyles = (colors) =>
+  StyleSheet.create({
+    container: {
+      flex: 1,
+      backgroundColor: colors.screenBg,
+    },
 
-  content: {
-    flexGrow: 1,
-    justifyContent: "center",
-    paddingHorizontal: 26,
-    paddingTop: 50,
-    paddingBottom: 40,
-  },
+    content: {
+      flexGrow: 1,
+      justifyContent: "center",
+      paddingHorizontal: 26,
+      paddingTop: 50,
+      paddingBottom: 40,
+    },
 
-  // When the keyboard is open, start from the top and leave room below
-  contentKeyboard: {
-    justifyContent: "flex-start",
-    paddingTop: 30,
-    paddingBottom: 24,
-  },
+    // When the keyboard is open, start from the top and leave room below
+    contentKeyboard: {
+      justifyContent: "flex-start",
+      paddingTop: 30,
+      paddingBottom: 24,
+    },
 
-  heroWrap: {
-    alignItems: "center",
-    marginBottom: 18,
-  },
+    heroWrap: {
+      alignItems: "center",
+      marginBottom: 18,
+    },
 
-  brandBadge: {
-    width: 74,
-    height: 74,
-    borderRadius: 22,
-    backgroundColor: colors.orange,
-    justifyContent: "center",
-    alignItems: "center",
-    marginBottom: 16,
-    shadowColor: "#F5C8AF",
-    shadowOpacity: 0.45,
-    shadowRadius: 18,
-    shadowOffset: { width: 0, height: 10 },
-    elevation: 5,
-  },
+    brandBadge: {
+      width: 74,
+      height: 74,
+      borderRadius: 22,
+      backgroundColor: colors.orange,
+      justifyContent: "center",
+      alignItems: "center",
+      marginBottom: 16,
+      shadowColor: "#F5C8AF",
+      shadowOpacity: 0.45,
+      shadowRadius: 18,
+      shadowOffset: { width: 0, height: 10 },
+      elevation: 5,
+    },
 
-  brandBadgeSmall: {
-    width: 52,
-    height: 52,
-    borderRadius: 16,
-    marginBottom: 0,
-  },
+    brandBadgeSmall: {
+      width: 52,
+      height: 52,
+      borderRadius: 16,
+      marginBottom: 0,
+    },
 
-  brandBadgeText: {
-    color: "#fff",
-    fontSize: 28,
-    fontWeight: "900",
-    letterSpacing: -1,
-  },
+    brandBadgeText: {
+      color: "#fff",
+      fontSize: 28,
+      fontWeight: "900",
+      letterSpacing: -1,
+    },
 
-  brandBadgeTextSmall: {
-    fontSize: 20,
-  },
+    brandBadgeTextSmall: {
+      fontSize: 20,
+    },
 
-  mascotCard: {
-    width: 150,
-    height: 150,
-    alignItems: "center",
-    justifyContent: "center",
-    position: "relative",
-  },
+    mascotCard: {
+      width: 150,
+      height: 150,
+      alignItems: "center",
+      justifyContent: "center",
+      position: "relative",
+    },
 
-  mascotBody: {
-    width: 104,
-    height: 104,
-    borderRadius: 52,
-    backgroundColor: colors.orange,
-    justifyContent: "center",
-    alignItems: "center",
-    borderBottomWidth: 6,
-    borderBottomColor: colors.orangeDeep,
-  },
+    mascotBody: {
+      width: 104,
+      height: 104,
+      borderRadius: 52,
+      backgroundColor: colors.orange,
+      justifyContent: "center",
+      alignItems: "center",
+      borderBottomWidth: 6,
+      borderBottomColor: colors.orangeDeep,
+    },
 
-  floatDot: {
-    position: "absolute",
-    width: 18,
-    height: 18,
-    borderRadius: 9,
-  },
+    floatDot: {
+      position: "absolute",
+      width: 18,
+      height: 18,
+      borderRadius: 9,
+    },
 
-  dotOrange: {
-    backgroundColor: colors.orange,
-    top: 10,
-    right: 18,
-  },
+    dotOrange: {
+      backgroundColor: colors.orange,
+      top: 10,
+      right: 18,
+    },
 
-  dotYellow: {
-    backgroundColor: colors.yellow,
-    bottom: 18,
-    left: 20,
-  },
+    dotYellow: {
+      backgroundColor: colors.yellow,
+      bottom: 18,
+      left: 20,
+    },
 
-  dotBlue: {
-    backgroundColor: colors.blue,
-    top: 26,
-    left: 6,
-  },
+    dotBlue: {
+      backgroundColor: colors.blue,
+      top: 26,
+      left: 6,
+    },
 
-  title: {
-    fontSize: 28,
-    fontWeight: "900",
-    textAlign: "center",
-    color: colors.text,
-    letterSpacing: -0.8,
-    marginBottom: 8,
-  },
+    title: {
+      fontSize: 28,
+      fontWeight: "900",
+      textAlign: "center",
+      color: colors.text,
+      letterSpacing: -0.8,
+      marginBottom: 8,
+    },
 
-  titleSmall: {
-    fontSize: 22,
-    marginBottom: 12,
-  },
+    titleSmall: {
+      fontSize: 22,
+      marginBottom: 12,
+    },
 
-  subtitle: {
-    fontSize: 15,
-    color: colors.textSecondary,
-    textAlign: "center",
-    marginBottom: 28,
-    fontWeight: "600",
-  },
+    subtitle: {
+      fontSize: 15,
+      color: colors.textSecondary,
+      textAlign: "center",
+      marginBottom: 28,
+      fontWeight: "600",
+    },
 
-  form: {
-    width: "100%",
-  },
+    form: {
+      width: "100%",
+    },
 
-  label: {
-    fontSize: 12,
-    fontWeight: "800",
-    color: colors.textSecondary,
-    letterSpacing: 0.6,
-    marginBottom: 8,
-    marginTop: 12,
-  },
+    label: {
+      fontSize: 12,
+      fontWeight: "800",
+      color: colors.textSecondary,
+      letterSpacing: 0.6,
+      marginBottom: 8,
+      marginTop: 12,
+    },
 
-  inputWrap: {
-    flexDirection: "row",
-    alignItems: "center",
-    height: 56,
-    backgroundColor: colors.card,
-    borderWidth: 1.5,
-    borderColor: colors.border,
-    borderRadius: radius.md,
-    paddingHorizontal: 14,
-    marginBottom: 6,
-  },
+    inputWrap: {
+      flexDirection: "row",
+      alignItems: "center",
+      height: 56,
+      backgroundColor: colors.card,
+      borderWidth: 1.5,
+      borderColor: colors.border,
+      borderRadius: radius.md,
+      paddingHorizontal: 14,
+      marginBottom: 6,
+    },
 
-  inputIcon: {
-    marginRight: 10,
-  },
+    inputIcon: {
+      marginRight: 10,
+    },
 
-  input: {
-    flex: 1,
-    fontSize: 16,
-    color: colors.text,
-    height: "100%",
-  },
+    input: {
+      flex: 1,
+      fontSize: 16,
+      color: colors.text,
+      height: "100%",
+    },
 
-  loginButton: {
-    marginTop: 26,
-  },
+    loginButton: {
+      marginTop: 26,
+    },
 
-  footerText: {
-    textAlign: "center",
-    color: colors.textMuted,
-    fontSize: 13,
-    marginTop: 20,
-  },
-});
+    footerText: {
+      textAlign: "center",
+      color: colors.textMuted,
+      fontSize: 13,
+      marginTop: 20,
+    },
+  });
