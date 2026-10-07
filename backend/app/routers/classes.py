@@ -4,9 +4,16 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import bindparam, text
 from sqlalchemy.orm import Session
 
+from app.course_activity import current_courses_for_class
 from app.database import get_db
 from app.deps import require_teacher
-from app.schemas import ClassCourseOut, ClassOut, ClassStudentOut, RankingEntryOut
+from app.schemas import (
+    ClassCourseOut,
+    ClassOut,
+    ClassStandingOut,
+    ClassStudentOut,
+    RankingEntryOut,
+)
 
 router = APIRouter(prefix="/classes", tags=["classes"])
 
@@ -168,6 +175,7 @@ def list_class_students(
     total_lessons = db.execute(CLASS_LESSON_TOTAL_QUERY, {"class_id": class_id}).scalar() or 0
     done_rows = db.execute(CLASS_LESSONS_DONE_QUERY, {"class_id": class_id}).mappings().all()
     done_by_student = {str(r["student_id"]): r["done"] for r in done_rows}
+    current_courses = current_courses_for_class(db, class_id)
 
     result = []
     for r in rows:
@@ -183,6 +191,7 @@ def list_class_students(
                 "current_streak": r["current_streak"],
                 "progress": round((done / total_lessons) * 100) if total_lessons else 0,
                 "last_active_at": r["last_active_at"],
+                "current_course": current_courses.get(str(r["id"])),
             }
         )
     return result
@@ -214,3 +223,109 @@ def list_class_courses(
             }
         )
     return result
+
+
+# XP earned in ONE course by each active student of the class, with the same
+# weekly / monthly / overall totals as the class ranking.
+COURSE_RANKING_QUERY = text("""
+    with ev as (
+        select x.student_id, x.amount, x.created_at
+        from xp_events x
+        join quizzes q on x.source = 'quiz' and q.id = x.source_id
+        join lessons l on l.id = q.lesson_id
+        join modules m on m.id = l.module_id
+        where m.course_id = :course_id
+          and x.student_id in (select id from profiles where class_id = :class_id)
+        union all
+        select x.student_id, x.amount, x.created_at
+        from xp_events x
+        join practices pr on x.source = 'practice' and pr.id = x.source_id
+        join lessons l on l.id = pr.lesson_id
+        join modules m on m.id = l.module_id
+        where m.course_id = :course_id
+          and x.student_id in (select id from profiles where class_id = :class_id)
+    )
+    select p.id, p.name,
+           coalesce(sum(ev.amount), 0) as xp,
+           coalesce(sum(ev.amount) filter (where ev.created_at >= now() - interval '7 days'), 0) as weekly_xp,
+           coalesce(sum(ev.amount) filter (where ev.created_at >= now() - interval '30 days'), 0) as monthly_xp
+    from profiles p
+    left join ev on ev.student_id = p.id
+    where p.role = 'student' and p.is_active and p.class_id = :class_id
+    group by p.id, p.name
+    order by xp desc, p.name asc
+""")
+
+# Every class with at least one active student, ranked by TOTAL XP of its
+# active students. count(distinct ...) because joining xp_events repeats rows.
+STANDINGS_QUERY = text("""
+    select c.id, c.name,
+           count(distinct p.id) as student_count,
+           coalesce(sum(x.amount), 0) as xp,
+           coalesce(sum(x.amount) filter (where x.created_at >= now() - interval '7 days'), 0) as weekly_xp,
+           coalesce(sum(x.amount) filter (where x.created_at >= now() - interval '30 days'), 0) as monthly_xp
+    from classes c
+    left join profiles p on p.class_id = c.id and p.role = 'student' and p.is_active
+    left join xp_events x on x.student_id = p.id
+    group by c.id, c.name
+    having count(distinct p.id) > 0
+    order by xp desc, c.name asc
+""")
+
+
+@router.get("/standings", response_model=list[ClassStandingOut])
+def get_class_standings(
+    current_user: dict = Depends(require_teacher),
+    db: Session = Depends(get_db),
+):
+    # Teachers see how their classes compare with the others. Other classes show
+    # only a name and totals (no students, and no id).
+    mine = _teacher_class_ids(db, uuid.UUID(current_user["id"]))
+    if not mine:
+        return []
+
+    rows = db.execute(STANDINGS_QUERY).mappings().all()
+    return [
+        {
+            "id": r["id"] if r["id"] in mine else None,
+            "name": r["name"],
+            "student_count": r["student_count"],
+            "xp": r["xp"],
+            "weekly_xp": r["weekly_xp"],
+            "monthly_xp": r["monthly_xp"],
+            "is_mine": r["id"] in mine,
+        }
+        for r in rows
+    ]
+
+
+@router.get("/{class_id}/courses/{course_id}/ranking", response_model=list[RankingEntryOut])
+def get_course_ranking(
+    class_id: str,
+    course_id: str,
+    current_user: dict = Depends(require_teacher),
+    db: Session = Depends(get_db),
+):
+    _require_teacher_class(db, current_user, class_id)
+
+    # Both ids come from the URL. The course must be assigned to this class.
+    assigned = db.execute(
+        text("select 1 from class_courses where class_id = :class_id and course_id = :course_id"),
+        {"class_id": class_id, "course_id": course_id},
+    ).first()
+    if assigned is None:
+        raise HTTPException(status_code=404, detail="Course not found")
+
+    rows = db.execute(
+        COURSE_RANKING_QUERY, {"class_id": class_id, "course_id": course_id}
+    ).mappings().all()
+    return [
+        {
+            "id": str(r["id"]),
+            "name": r["name"],
+            "xp": r["xp"],
+            "weekly_xp": r["weekly_xp"],
+            "monthly_xp": r["monthly_xp"],
+        }
+        for r in rows
+    ]
