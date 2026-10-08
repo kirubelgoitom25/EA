@@ -110,7 +110,14 @@ function ScalePressable({
 
   return (
     <Pressable
-      onPress={onPress ? (event) => { haptic.light(); onPress(event); } : undefined}
+      onPress={
+        onPress
+          ? (event) => {
+              haptic.light();
+              onPress(event);
+            }
+          : undefined
+      }
       onPressIn={handlePressIn}
       onPressOut={handlePressOut}
       hitSlop={hitSlop}
@@ -247,14 +254,14 @@ export default function ProfileScreen({
   const position = useMemo(() => {
     const others = ranking.filter((item) => item.id !== user.id);
     const combined = [...others, { id: user.id, xp: user.xp }].sort(
-      (a, b) => b.xp - a.xp
+      (a, b) => b.xp - a.xp,
     );
     return combined.findIndex((item) => item.id === user.id) + 1;
   }, [user, ranking]);
 
   // Staggered entrance: one value per section
   const entrances = useRef(
-    Array.from({ length: SECTION_COUNT }, () => new Animated.Value(0))
+    Array.from({ length: SECTION_COUNT }, () => new Animated.Value(0)),
   ).current;
 
   useEffect(() => {
@@ -266,8 +273,8 @@ export default function ProfileScreen({
           duration: 280,
           easing: Easing.out(Easing.cubic),
           useNativeDriver: true,
-        })
-      )
+        }),
+      ),
     );
     anim.start();
     return () => anim.stop();
@@ -291,8 +298,8 @@ export default function ProfileScreen({
       LayoutAnimation.create(
         220,
         LayoutAnimation.Types.easeInEaseOut,
-        LayoutAnimation.Properties.opacity
-      )
+        LayoutAnimation.Properties.opacity,
+      ),
     );
 
     setAppearanceOpen((prev) => !prev);
@@ -331,9 +338,7 @@ export default function ProfileScreen({
           <View style={styles.identity}>
             <View style={styles.avatarHalo}>
               <View style={styles.avatar}>
-                <Text style={styles.avatarText}>
-                  {getInitials(user.name)}
-                </Text>
+                <Text style={styles.avatarText}>{getInitials(user.name)}</Text>
               </View>
             </View>
 
@@ -341,9 +346,7 @@ export default function ProfileScreen({
               {user.name}
             </Text>
 
-            {!!user.role && (
-              <Text style={styles.roleText}>{user.role}</Text>
-            )}
+            {!!user.role && <Text style={styles.roleText}>{user.role}</Text>}
           </View>
         </Animated.View>
 
@@ -356,16 +359,10 @@ export default function ProfileScreen({
             style={styles.statsCard}
           >
             <View style={styles.statsTop}>
-              <XpProgressRing
-                xp={user.xp}
-                size={74}
-                strokeWidth={7}
-              />
+              <XpProgressRing xp={user.xp} size={74} strokeWidth={7} />
 
               <View style={styles.xpBlock}>
-                <Text style={styles.xpValue}>
-                  {xpNumber.toLocaleString()}
-                </Text>
+                <Text style={styles.xpValue}>{xpNumber.toLocaleString()}</Text>
                 <Text style={styles.xpLabel}>TOTAL XP</Text>
               </View>
             </View>
@@ -376,9 +373,7 @@ export default function ProfileScreen({
               <View style={styles.miniStat}>
                 <View style={styles.miniStatValueRow}>
                   <Ionicons name="flame" size={16} color="#fff" />
-                  <Text style={styles.miniStatValue}>
-                    {user.streak ?? 0}
-                  </Text>
+                  <Text style={styles.miniStatValue}>{user.streak ?? 0}</Text>
                 </View>
                 <Text style={styles.miniStatLabel}>Day streak</Text>
               </View>
@@ -388,9 +383,7 @@ export default function ProfileScreen({
               <View style={styles.miniStat}>
                 <View style={styles.miniStatValueRow}>
                   <Ionicons name="trophy" size={15} color="#fff" />
-                  <Text style={styles.miniStatValue}>
-                    #{position}
-                  </Text>
+                  <Text style={styles.miniStatValue}>#{position}</Text>
                 </View>
                 <Text style={styles.miniStatLabel}>Weekly rank</Text>
               </View>
@@ -403,7 +396,10 @@ export default function ProfileScreen({
           <View style={styles.divider} />
 
           <Pressable
-            onPress={() => { haptic.light(); toggleAppearance(); }}
+            onPress={() => {
+              haptic.light();
+              toggleAppearance();
+            }}
             style={styles.appearanceHeaderButton}
             accessibilityRole="button"
             accessibilityLabel="Appearance settings"
@@ -412,9 +408,7 @@ export default function ProfileScreen({
             <View style={styles.sectionHeaderRow}>
               <View style={styles.sectionHeaderText}>
                 <Text style={styles.sectionTitle}>APPEARANCE</Text>
-                <Text style={styles.sectionSubtitle}>
-                  Choose your theme
-                </Text>
+                <Text style={styles.sectionSubtitle}>Choose your theme</Text>
               </View>
 
               <View style={styles.appearanceHeaderRight}>
@@ -439,11 +433,7 @@ export default function ProfileScreen({
                 </Animated.Text>
 
                 <Ionicons
-                  name={
-                    appearanceOpen
-                      ? "chevron-up"
-                      : "chevron-down"
-                  }
+                  name={appearanceOpen ? "chevron-up" : "chevron-down"}
                   size={18}
                   color={colors.textMuted}
                   style={styles.appearanceChevron}
@@ -497,11 +487,7 @@ export default function ProfileScreen({
             accessibilityLabel="EA Coach. Coming soon in a future update."
           >
             <View style={styles.soonIcon}>
-              <Ionicons
-                name="sparkles"
-                size={18}
-                color={colors.orangeDeep}
-              />
+              <Ionicons name="sparkles" size={18} color={colors.orangeDeep} />
             </View>
 
             <Text style={styles.soonText}>
@@ -529,10 +515,7 @@ export default function ProfileScreen({
 
             <View style={styles.infoTextBlock}>
               <Text style={styles.infoLabel}>Email</Text>
-              <Text
-                style={styles.infoValue}
-                numberOfLines={1}
-              >
+              <Text style={styles.infoValue} numberOfLines={1}>
                 {user.email}
               </Text>
             </View>
@@ -552,36 +535,26 @@ export default function ProfileScreen({
 
                 <View style={styles.infoTextBlock}>
                   <Text style={styles.infoLabel}>Role</Text>
-                  <Text
-                    style={styles.infoValue}
-                    numberOfLines={1}
-                  >
+                  <Text style={styles.infoValue} numberOfLines={1}>
                     {user.role}
                   </Text>
                 </View>
               </View>
             </>
           )}
+          <Text style={styles.privacyNote}>
+            Your teacher can see when you are online and which lesson you have
+            open.
+          </Text>
         </Animated.View>
 
         {/* Log out */}
-        <Animated.View
-          style={[
-            styles.logoutWrap,
-            riseInStyle(entrances[7]),
-          ]}
-        >
+        <Animated.View style={[styles.logoutWrap, riseInStyle(entrances[7])]}>
           <DuoButton
             label="Log out"
             variant="danger"
             onPress={onLogout}
-            icon={
-              <Ionicons
-                name="log-out-outline"
-                size={18}
-                color="#fff"
-              />
-            }
+            icon={<Ionicons name="log-out-outline" size={18} color="#fff" />}
           />
         </Animated.View>
       </ScrollView>
@@ -966,6 +939,12 @@ const createStyles = (colors) =>
       height: 1,
       backgroundColor: colors.border,
       marginLeft: 36,
+    },
+    privacyNote: {
+      fontSize: 12,
+      lineHeight: 18,
+      color: colors.textSecondary,
+      marginTop: 10,
     },
 
     logoutWrap: {

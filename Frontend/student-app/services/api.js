@@ -321,3 +321,33 @@ export async function submitPractice(lessonId, answers) {
     isFirstCompletion: result.is_first_completion,
   };
 }
+
+// ---- Presence -------------------------------------------------------------
+
+// Tells the teacher dashboard that the student has the app open. lessonId is
+// the lesson whose screen is open right now, or null.
+//
+// This is best effort and is deliberately silent: it never shows an error,
+// and it never signs the student out (unlike request(), which does on a 401).
+export async function sendHeartbeat(lessonId = null) {
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+
+  if (!session) {
+    return;
+  }
+
+  try {
+    await fetch(`${API_BASE_URL}/me/heartbeat`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${session.access_token}`,
+      },
+      body: JSON.stringify({ lesson_id: lessonId }),
+    });
+  } catch (error) {
+    // Offline or the server is busy: try again at the next beat.
+  }
+}
