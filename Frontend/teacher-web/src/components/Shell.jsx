@@ -1,5 +1,5 @@
 import { Link, Outlet, useLocation } from "react-router-dom";
-import { LayoutGrid, LogOut } from "lucide-react";
+import { LayoutGrid, LogOut, Trophy } from "lucide-react";
 import { useAuth } from "../auth/AuthContext.jsx";
 
 export default function Shell() {
@@ -7,6 +7,7 @@ export default function Shell() {
   const { pathname } = useLocation();
   const classesActive =
     pathname.startsWith("/classes") || pathname.startsWith("/students");
+  const rankingsActive = pathname.startsWith("/rankings");
 
   return (
     <div className="shell">
@@ -22,6 +23,13 @@ export default function Shell() {
           >
             <LayoutGrid size={20} />
             <span>Classes</span>
+          </Link>
+          <Link
+            to="/rankings"
+            className={`nav-item${rankingsActive ? " active" : ""}`}
+          >
+            <Trophy size={20} />
+            <span>Rankings</span>
           </Link>
         </nav>
         <button className="nav-item" onClick={signOut}>

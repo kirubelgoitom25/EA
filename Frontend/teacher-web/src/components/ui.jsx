@@ -1,12 +1,24 @@
 import { initials } from "../lib/format.js";
 
-export function Avatar({ name, size = 36 }) {
-  return (
+// `online` is optional: leave it out for no dot, pass true/false for a green/gray dot.
+export function Avatar({ name, size = 36, online }) {
+  const circle = (
     <span
       className="avatar"
       style={{ width: size, height: size, fontSize: Math.round(size / 3) }}
     >
       {initials(name)}
+    </span>
+  );
+  if (online === undefined) return circle;
+
+  return (
+    <span className="avatar-wrap">
+      {circle}
+      <span
+        className={`dot ${online ? "dot-on" : "dot-off"}`}
+        title={online ? "Online" : "Offline"}
+      />
     </span>
   );
 }

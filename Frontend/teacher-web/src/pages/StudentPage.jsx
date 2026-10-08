@@ -2,7 +2,8 @@ import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { ChevronLeft, Trophy, Zap } from "lucide-react";
 import { api } from "../lib/api.js";
-import { formatXp } from "../lib/format.js";
+import { courseLabel, formatXp, statusLine } from "../lib/format.js";
+import { usePresence } from "../lib/usePresence.js";
 import { Avatar, ProgressBar } from "../components/ui.jsx";
 
 export default function StudentPage() {
@@ -10,6 +11,7 @@ export default function StudentPage() {
   const [student, setStudent] = useState(null);
   const [className, setClassName] = useState("");
   const [error, setError] = useState("");
+  const presence = usePresence(student ? student.class_id : null);
 
   useEffect(() => {
     let active = true;
@@ -58,6 +60,8 @@ export default function StudentPage() {
     );
   }
 
+  const entry = presence[student.id];
+  const online = Boolean(entry && entry.online);
   const backTo = student.class_id
     ? `/classes/${encodeURIComponent(student.class_id)}`
     : "/classes";
@@ -78,9 +82,20 @@ export default function StudentPage() {
       </Link>
 
       <header className="student-head">
-        <Avatar name={student.name} size={56} />
+        <Avatar
+          name={student.name}
+          size={56}
+          online={entry ? entry.online : undefined}
+        />
         <div>
           <h1>{student.name}</h1>
+          <p className={`sub${online ? " online" : ""}`}>
+            {statusLine({
+              entry,
+              currentCourse: student.current_course,
+              courses: student.courses,
+            })}
+          </p>
           <p className="sub">
             {student.email}
             {!student.is_active && " · Inactive"}
@@ -119,30 +134,46 @@ export default function StudentPage() {
         </section>
       )}
 
-      {student.courses.map((c) => (
-        <section className="card course-card" key={c.id}>
-          <div className="course-top">
-            <h3>{c.title}</h3>
-            {c.rank ? (
-              <span className="pill num">
-                <Trophy size={13} />#{c.rank} of {c.class_size}
+      {student.courses.map((c) => {
+        const studyingNow = online && entry.course && entry.course.id === c.id;
+        const lastWorked =
+          !studyingNow &&
+          student.current_course &&
+          student.current_course.id === c.id;
+        return (
+          <section className="card course-card" key={c.id}>
+            <div className="course-top">
+              <div className="course-title">
+                <h3>{courseLabel(c, student.courses)}</h3>
+                {studyingNow && (
+                  <span className="pill pill-live">Studying now</span>
+                )}
+                {lastWorked && (
+                  <span className="pill pill-cold">Last worked on</span>
+                )}
+              </div>
+              {c.rank ? (
+                <span className="pill num">
+                  <Trophy size={13} />#{c.rank} of {c.class_size}
+                </span>
+              ) : (
+                <span className="pill pill-cold">No XP yet</span>
+              )}
+            </div>
+            <ProgressBar value={c.progress} />
+            <div className="course-meta">
+              <span className="num">
+                {c.progress}% · {c.completed_lessons} / {c.total_lessons}{" "}
+                lessons
               </span>
-            ) : (
-              <span className="pill pill-cold">No XP yet</span>
-            )}
-          </div>
-          <ProgressBar value={c.progress} />
-          <div className="course-meta">
-            <span className="num">
-              {c.progress}% · {c.completed_lessons} / {c.total_lessons} lessons
-            </span>
-            <span className="pill num">
-              <Zap size={13} />
-              {formatXp(c.xp)} XP
-            </span>
-          </div>
-        </section>
-      ))}
+              <span className="pill num">
+                <Zap size={13} />
+                {formatXp(c.xp)} XP
+              </span>
+            </div>
+          </section>
+        );
+      })}
     </>
   );
 }
