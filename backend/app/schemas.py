@@ -2,7 +2,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Literal, Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 Role = Literal["student", "teacher"]
 
@@ -196,3 +196,19 @@ class ClassStandingOut(BaseModel):
     weekly_xp: Decimal
     monthly_xp: Decimal
     is_mine: bool
+    
+class HeartbeatIn(BaseModel):
+    lesson_id: Optional[str] = Field(default=None, max_length=100)
+
+
+class PresenceLessonOut(BaseModel):
+    id: str
+    title: str
+
+
+class PresenceOut(BaseModel):
+    student_id: str
+    online: bool
+    seconds_since_seen: Optional[int] = None
+    lesson: Optional[PresenceLessonOut] = None
+    course: Optional[CurrentCourseOut] = None
