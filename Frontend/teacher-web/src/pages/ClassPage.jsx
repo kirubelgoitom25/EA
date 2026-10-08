@@ -2,7 +2,15 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { ChevronLeft, Flame, Zap } from "lucide-react";
 import { api } from "../lib/api.js";
-import { formatXp, lastActive, toNumber } from "../lib/format.js";
+import {
+  courseLabel,
+  formatXp,
+  lastActive,
+  rankBy,
+  statusLine,
+  toNumber,
+} from "../lib/format.js";
+import { usePresence } from "../lib/usePresence.js";
 import { Avatar, ProgressBar, RankBadge, Tabs } from "../components/ui.jsx";
 
 const PERIODS = [
@@ -16,6 +24,7 @@ export default function ClassPage() {
   const [data, setData] = useState(null);
   const [error, setError] = useState("");
   const [period, setPeriod] = useState("weekly");
+  const presence = usePresence(classId);
 
   useEffect(() => {
     let active = true;
@@ -44,25 +53,11 @@ export default function ClassPage() {
 
   const field = PERIODS.find((p) => p.key === period).field;
 
-  // Active students ranked by the XP of the chosen period. Ties share a rank,
-  // and a student with 0 XP in the period gets no rank.
   const { rows, inactive } = useMemo(() => {
     if (!data) return { rows: [], inactive: [] };
     const active = data.students.filter((s) => s.is_active);
-    const sorted = [...active].sort(
-      (a, b) =>
-        toNumber(b[field]) - toNumber(a[field]) || a.name.localeCompare(b.name),
-    );
-    const ranked = sorted.map((s) => {
-      const xp = toNumber(s[field]);
-      const rank =
-        xp > 0
-          ? 1 + active.filter((o) => toNumber(o[field]) > xp).length
-          : null;
-      return { ...s, periodXp: xp, rank };
-    });
     return {
-      rows: ranked,
+      rows: rankBy(active, field),
       inactive: data.students.filter((s) => !s.is_active),
     };
   }, [data, field]);
@@ -100,6 +95,8 @@ export default function ClassPage() {
   const activeThisWeek = activeStudents.filter(
     (s) => toNumber(s.weekly_xp) > 0,
   ).length;
+  const presenceLoaded = Object.keys(presence).length > 0;
+  const onlineNow = activeStudents.filter((s) => presence[s.id]?.online).length;
 
   return (
     <>
@@ -113,8 +110,10 @@ export default function ClassPage() {
         <h1>{data.name}</h1>
         <div className="hero-stats">
           <div>
-            <div className="hero-value num">{activeStudents.length}</div>
-            <div className="hero-label">Students</div>
+            <div className="hero-value num">
+              {presenceLoaded ? `${onlineNow} / ${activeStudents.length}` : "–"}
+            </div>
+            <div className="hero-label">Online now</div>
           </div>
           <div className="hero-divider" />
           <div>
@@ -133,7 +132,9 @@ export default function ClassPage() {
 
       <section className="card">
         <div className="card-head">
-          <h2 className="label">Class ranking</h2>
+          <h2 className="label">
+            Class ranking · {activeStudents.length} students
+          </h2>
           <Tabs tabs={PERIODS} value={period} onChange={setPeriod} />
         </div>
 
@@ -141,27 +142,39 @@ export default function ClassPage() {
           <p className="empty-inline">No students in this class yet.</p>
         )}
 
-        {rows.map((s) => (
-          <Link className="row row-link" to={`/students/${s.id}`} key={s.id}>
-            <RankBadge rank={s.rank} />
-            <Avatar name={s.name} />
-            <span className="who">
-              <span className="name">{s.name}</span>
-              <span className="sub">{lastActive(s.last_active_at)}</span>
-            </span>
-            <ProgressBar value={s.progress} />
-            <span className="pill num">
-              <Zap size={13} />
-              {formatXp(s.periodXp)} XP
-            </span>
-            <span
-              className={`pill num ${s.current_streak === 0 ? "pill-cold" : ""}`}
-            >
-              <Flame size={13} />
-              {s.current_streak}
-            </span>
-          </Link>
-        ))}
+        {rows.map((s) => {
+          const entry = presence[s.id];
+          return (
+            <Link className="row row-link" to={`/students/${s.id}`} key={s.id}>
+              <RankBadge rank={s.rank} />
+              <Avatar name={s.name} online={entry ? entry.online : undefined} />
+              <span className="who">
+                <span className="name">{s.name}</span>
+                <span
+                  className={`sub${entry && entry.online ? " online" : ""}`}
+                >
+                  {statusLine({
+                    entry,
+                    currentCourse: s.current_course,
+                    lastActiveAt: s.last_active_at,
+                    courses: data.courses,
+                  })}
+                </span>
+              </span>
+              <ProgressBar value={s.progress} />
+              <span className="pill num">
+                <Zap size={13} />
+                {formatXp(s.periodXp)} XP
+              </span>
+              <span
+                className={`pill num ${s.current_streak === 0 ? "pill-cold" : ""}`}
+              >
+                <Flame size={13} />
+                {s.current_streak}
+              </span>
+            </Link>
+          );
+        })}
 
         {inactive.length > 0 && (
           <>
@@ -194,7 +207,7 @@ export default function ClassPage() {
           </div>
           {data.courses.map((c) => (
             <div className="row" key={c.id}>
-              <span className="name">{c.title}</span>
+              <span className="name">{courseLabel(c, data.courses)}</span>
               <span className="sub">{c.total_lessons} lessons</span>
               <ProgressBar value={c.avg_progress} />
               <span className="pill num">{c.avg_progress}%</span>

@@ -386,3 +386,28 @@
   display: flex; justify-content: space-between; align-items: center; margin-top: 12px;
   font-size: 13px; font-weight: 700; color: var(--text-secondary);
 }
+
+/* Rankings, presence and status */
+.toolbar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+.select {
+  height: 44px; padding: 0 14px; border: 1.5px solid var(--border); border-radius: 16px;
+  background: var(--card); color: var(--text); font: inherit; font-weight: 800;
+}
+.tabs { flex-wrap: wrap; max-width: 100%; }
+
+.row-mine { background: var(--light); box-shadow: inset 4px 0 0 var(--primary); }
+.row-mine:hover { background: var(--light); }
+
+.avatar-wrap { position: relative; display: inline-flex; flex: none; }
+.dot {
+  position: absolute; right: -1px; bottom: -1px; width: 12px; height: 12px;
+  border-radius: 50%; border: 2px solid var(--card);
+}
+.dot-on { background: var(--mint); }
+.dot-off { background: var(--border-strong); }
+
+.who .sub { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sub.online { color: var(--deep); font-weight: 700; }
+
+.course-title { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; min-width: 0; }
+.pill-live { background: var(--primary); color: #fff; }
