@@ -5,7 +5,14 @@ import React, {
   useRef,
   useState,
 } from "react";
-import { View, ActivityIndicator, StyleSheet, Alert, LogBox } from "react-native";
+import {
+  View,
+  ActivityIndicator,
+  StyleSheet,
+  Alert,
+  LogBox,
+  AppState,
+} from "react-native";
 
 import LoginScreen from "./components/LoginScreen";
 import HomeScreen from "./components/HomeScreen";
@@ -25,6 +32,7 @@ import {
   fetchStudent,
   fetchCourses,
   fetchRanking,
+  sendHeartbeat,
 } from "./services/api";
 import { useTheme } from "./theme";
 
@@ -191,8 +199,8 @@ export default function App() {
       }
       setSelectedCourse((current) =>
         current
-          ? coursesData.find((course) => course.id === current.id) ?? current
-          : current
+          ? (coursesData.find((course) => course.id === current.id) ?? current)
+          : current,
       );
     } catch (error) {
       // Keep the current data on screen.
@@ -204,6 +212,48 @@ export default function App() {
       }
     }
   }, [rankingScope, rankingPeriod]);
+  // Presence: while a student is logged in and the app is open, tell the
+  // server every 45 seconds, and say which lesson screen is open (if any).
+  // It stops when the app goes to the background or the student logs out.
+  const lessonScreens = ["lesson", "quiz", "practice"];
+  const heartbeatLessonId = lessonScreens.includes(screen)
+    ? (selectedLesson?.id ?? null)
+    : null;
+
+  useEffect(() => {
+    if (!user) {
+      return undefined;
+    }
+
+    let timer = null;
+    const beat = () => sendHeartbeat(heartbeatLessonId);
+    const start = () => {
+      beat();
+      timer = setInterval(beat, 45000);
+    };
+    const stop = () => {
+      if (timer) {
+        clearInterval(timer);
+        timer = null;
+      }
+    };
+
+    if (AppState.currentState === "active") {
+      start();
+    }
+
+    const subscription = AppState.addEventListener("change", (state) => {
+      stop();
+      if (state === "active") {
+        start();
+      }
+    });
+
+    return () => {
+      stop();
+      subscription.remove();
+    };
+  }, [user, heartbeatLessonId]);
 
   // Switch screens, and fetch fresh data whenever the screen actually changes.
   const goTo = (target) => {
@@ -257,7 +307,7 @@ export default function App() {
         }
       }
     },
-    [rankingPeriod]
+    [rankingPeriod],
   );
 
   const onRankingPeriodChange = useCallback(
@@ -283,7 +333,7 @@ export default function App() {
         }
       }
     },
-    [rankingScope]
+    [rankingScope],
   );
 
   const openCourse = (course) => {
@@ -296,9 +346,7 @@ export default function App() {
     setScreen("lesson");
   };
 
-  const rankingEntries = Array.isArray(ranking?.entries)
-    ? ranking.entries
-    : [];
+  const rankingEntries = Array.isArray(ranking?.entries) ? ranking.entries : [];
 
   if (restoring) {
     return (
@@ -422,11 +470,12 @@ export default function App() {
   return null;
 }
 
-const createStyles = (colors) => StyleSheet.create({
-  loadingScreen: {
-    flex: 1,
-    justifyContent: "center",
-    alignItems: "center",
-    backgroundColor: colors.screenBg,
-  },
-});
+const createStyles = (colors) =>
+  StyleSheet.create({
+    loadingScreen: {
+      flex: 1,
+      justifyContent: "center",
+      alignItems: "center",
+      backgroundColor: colors.screenBg,
+    },
+  });
