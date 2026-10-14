@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func
 from sqlalchemy.orm import Session, selectinload
 
+from app.access import lesson_is_in_class
 from app.database import get_db
 from app.deps import require_student
 from app.models import LessonProgress, Quiz, QuizAttempt
@@ -54,6 +55,12 @@ def get_quiz(
     current_user: dict = Depends(require_student),
     db: Session = Depends(get_db),
 ):
+    # The lesson id comes from the URL, so it is never trusted. Only lessons of
+    # the student's own class are allowed, and anything else looks exactly like
+    # "no such quiz".
+    if not lesson_is_in_class(db, lesson_id, current_user.get("class_id")):
+        raise HTTPException(status_code=404, detail="Quiz not found")
+
     quiz = _get_quiz_or_404(db, lesson_id)
     student_id = uuid.UUID(current_user["id"])
     attempt_number = _next_attempt_number(db, student_id, quiz.id)
@@ -82,6 +89,9 @@ def submit_quiz(
     current_user: dict = Depends(require_student),
     db: Session = Depends(get_db),
 ):
+    if not lesson_is_in_class(db, lesson_id, current_user.get("class_id")):
+        raise HTTPException(status_code=404, detail="Quiz not found")
+
     quiz = _get_quiz_or_404(db, lesson_id)
     student_id = uuid.UUID(current_user["id"])
 

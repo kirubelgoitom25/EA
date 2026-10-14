@@ -6,7 +6,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.deps import get_current_user, require_student
+from app.deps import require_student
 from app.models import Streak
 from app.schemas import MeStatsOut, RankingEntryOut
 
@@ -28,7 +28,7 @@ CLASS_RANKING_QUERY = """
            coalesce(sum(x.amount) filter (where x.created_at >= now() - interval '30 days'), 0) as monthly_xp
     from public.profiles p
     left join public.xp_events x on x.student_id = p.id
-    where p.role = 'student' and p.is_active and p.class_id is not distinct from :class_id
+    where p.role = 'student' and p.is_active and p.class_id = :class_id
     group by p.id, p.name
     order by xp desc, p.name asc
 """
@@ -64,14 +64,18 @@ def get_my_stats(current_user: dict = Depends(require_student), db: Session = De
 @router.get("/ranking", response_model=list[RankingEntryOut])
 def get_ranking(
     scope: Literal["class", "national"] = Query("class"),
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(require_student),
     db: Session = Depends(get_db),
 ):
+    # Students only. Teachers have their own class views and must not be able
+    # to list every student of every class.
     if scope == "class":
-        rows = db.execute(
-            text(CLASS_RANKING_QUERY),
-            {"class_id": current_user.get("class_id")},
-        ).mappings().all()
+        class_id = current_user.get("class_id")
+        if class_id is None:
+            # A student with no class has no classmates. Before this check, the
+            # query matched every other class-less account.
+            return []
+        rows = db.execute(text(CLASS_RANKING_QUERY), {"class_id": class_id}).mappings().all()
     else:
         rows = db.execute(text(RANKING_QUERY)).mappings().all()
 

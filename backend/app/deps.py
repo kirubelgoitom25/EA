@@ -14,7 +14,11 @@ from app.models import Profile
 bearer_scheme = HTTPBearer(auto_error=False)
 jwks_client = PyJWKClient(settings.supabase_jwks_url)
 
-INVALID_TOKEN = HTTPException(status_code=401, detail="Invalid or expired token")
+
+def _invalid_token() -> HTTPException:
+    # A fresh exception every time. Raising one shared object over and over
+    # makes Python keep growing its traceback, which holds memory.
+    return HTTPException(status_code=401, detail="Invalid or expired token")
 
 
 def get_current_user(
@@ -22,7 +26,7 @@ def get_current_user(
     db: Session = Depends(get_db),
 ) -> dict:
     if credentials is None:
-        raise INVALID_TOKEN
+        raise _invalid_token()
 
     token = credentials.credentials
 
@@ -36,16 +40,20 @@ def get_current_user(
             issuer=settings.supabase_issuer,
         )
     except jwt.PyJWTError:
-        raise INVALID_TOKEN
+        raise _invalid_token()
 
     try:
         profile_id = uuid.UUID(payload.get("sub", ""))
     except ValueError:
-        raise INVALID_TOKEN
+        raise _invalid_token()
 
     profile = db.get(Profile, profile_id)
     if profile is None:
-        raise INVALID_TOKEN
+        raise _invalid_token()
+
+    # A deactivated account is refused even when its token is still valid.
+    if not profile.is_active:
+        raise HTTPException(status_code=403, detail="This account is turned off.")
 
     return {
         "id": str(profile.id),
