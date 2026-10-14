@@ -4,6 +4,7 @@ from decimal import Decimal
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session, selectinload
 
+from app.access import lesson_is_in_class
 from app.database import get_db
 from app.deps import require_student
 from app.models import LessonProgress, Practice, PracticeAttempt
@@ -49,6 +50,10 @@ def get_practice(
     current_user: dict = Depends(require_student),
     db: Session = Depends(get_db),
 ):
+    # Only lessons of the student's own class are allowed.
+    if not lesson_is_in_class(db, lesson_id, current_user.get("class_id")):
+        raise HTTPException(status_code=404, detail="Practice not found")
+
     practice = _get_practice_or_404(db, lesson_id)
     student_id = uuid.UUID(current_user["id"])
 
@@ -79,6 +84,9 @@ def submit_practice(
     current_user: dict = Depends(require_student),
     db: Session = Depends(get_db),
 ):
+    if not lesson_is_in_class(db, lesson_id, current_user.get("class_id")):
+        raise HTTPException(status_code=404, detail="Practice not found")
+
     practice = _get_practice_or_404(db, lesson_id)
     student_id = uuid.UUID(current_user["id"])
 
