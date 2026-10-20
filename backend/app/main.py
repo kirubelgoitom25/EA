@@ -1,7 +1,7 @@
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 
 from app.routers import auth, classes, courses, practice, presence, quiz, stats, students
 from fastapi import Depends, FastAPI, Request
@@ -57,6 +57,10 @@ app.include_router(presence.router)
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+@app.head("/health", include_in_schema=False)
+def health_head():
+    return Response(status_code=200)
 
 
 @app.get("/health/db")

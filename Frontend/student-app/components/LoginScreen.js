@@ -175,7 +175,7 @@ export default function LoginScreen({ onLogin }) {
 
         {!keyboardVisible && (
           <Text style={styles.footerText}>
-            New here? Ask your teacher to create an account for you.
+            New here? The Administrator to create an account for you.
           </Text>
         )}
       </ScrollView>
