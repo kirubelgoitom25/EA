@@ -5,6 +5,7 @@ import jwt
 from fastapi import Depends, HTTPException
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jwt import PyJWKClient
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.config import settings
@@ -13,6 +14,16 @@ from app.models import Profile
 
 bearer_scheme = HTTPBearer(auto_error=False)
 jwks_client = PyJWKClient(settings.supabase_jwks_url)
+
+# The apps look for this exact text to recognise a turned-off account, so do
+# not reword it without changing them too.
+ACCOUNT_OFF_MESSAGE = "This account is turned off."
+
+# A Supabase ban lives on the auth user (banned_until), not on our profile, and
+# tokens that were already issued keep working until they expire. So the ban is
+# checked on every request. A user who was never banned gives NULL, which is
+# treated as "not banned".
+BANNED_QUERY = text("select banned_until > now() from auth.users where id = :id")
 
 
 def _invalid_token() -> HTTPException:
@@ -51,9 +62,11 @@ def get_current_user(
     if profile is None:
         raise _invalid_token()
 
-    # A deactivated account is refused even when its token is still valid.
-    if not profile.is_active:
-        raise HTTPException(status_code=403, detail="This account is turned off.")
+    # A turned-off account is refused even when its token is still valid:
+    # either our own flag is off, or Supabase has the user banned.
+    banned = db.execute(BANNED_QUERY, {"id": profile_id}).scalar()
+    if not profile.is_active or banned:
+        raise HTTPException(status_code=403, detail=ACCOUNT_OFF_MESSAGE)
 
     return {
         "id": str(profile.id),
