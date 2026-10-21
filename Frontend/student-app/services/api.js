@@ -1,6 +1,12 @@
 import { supabase } from "../lib/supabase";
 import { API_BASE_URL } from "../config";
 
+
+
+// The backend sends this exact text when an account has been turned off.
+const ACCOUNT_OFF = "This account is turned off.";
+const ACCOUNT_OFF_TEXT =
+  "This account has been turned off. Please contact your teacher.";
 // ---- Plumbing ------------------------------------------------------
 
 class ApiError extends Error {
@@ -40,6 +46,15 @@ async function request(path, options = {}) {
   }
 
   const body = await response.json().catch(() => null);
+
+    // Turned-off account: sign out and say why. The accountOff flag lets the
+  // screens show one clear message.
+  if (response.status === 403 && body?.detail === ACCOUNT_OFF) {
+    await supabase.auth.signOut();
+    const error = new ApiError(ACCOUNT_OFF_TEXT, 403);
+    error.accountOff = true;
+    throw error;
+  }
 
   if (!response.ok) {
     throw new ApiError(
@@ -105,6 +120,10 @@ export async function loginUser(email, password) {
         "Can't reach the server. Check your connection and try again.",
       );
     }
+    // A banned account gets a clear message instead of "wrong password".
+    if (error.code === "user_banned" || /banned/i.test(error.message || "")) {
+      throw new Error(ACCOUNT_OFF_TEXT);
+    }
     throw new Error("Incorrect email or password.");
   }
 
@@ -129,6 +148,10 @@ export async function restoreSession() {
   try {
     return await loadStudentUser();
   } catch (error) {
+    // Let the app say why, if the account was turned off.
+    if (error.accountOff) {
+      throw error;
+    }
     return null;
   }
 }
