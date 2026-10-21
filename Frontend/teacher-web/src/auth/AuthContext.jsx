@@ -6,7 +6,7 @@ import {
   useState,
 } from "react";
 import { supabase } from "../lib/supabase.js";
-import { api } from "../lib/api.js";
+import { api, ACCOUNT_OFF_TEXT } from '../lib/api.js'
 
 const AuthContext = createContext(null);
 
@@ -57,12 +57,16 @@ export function AuthProvider({ children }) {
         password,
       });
       if (error) {
-        console.error("Supabase sign-in error:", error.status, error.message);
+        console.error('Supabase sign-in error:', error.status, error.message)
+        // A banned user gets a clear message instead of "wrong password".
+        if (error.code === 'user_banned' || /banned/i.test(error.message || '')) {
+          throw new Error(ACCOUNT_OFF_TEXT)
+        }
         throw new Error(
           import.meta.env.DEV
             ? `Sign-in failed: ${error.message}`
-            : "Wrong email or password.",
-        );
+            : 'Wrong email or password.',
+        )
       }
       await loadProfile();
     },

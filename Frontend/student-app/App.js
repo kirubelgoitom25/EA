@@ -96,7 +96,11 @@ export default function App() {
           setScreen("home");
         }
       })
-      .catch(() => {})
+      .catch((error) => {
+        if (error?.accountOff) {
+          Alert.alert("Account turned off", error.message);
+        }
+      })
       .finally(() => {
         if (!cancelled) {
           setRestoring(false);
@@ -203,7 +207,10 @@ export default function App() {
           : current,
       );
     } catch (error) {
-      // Keep the current data on screen.
+      // Keep the current data on screen, unless the account was turned off.
+      if (error?.accountOff) {
+        Alert.alert("Account turned off", error.message);
+      }
     } finally {
       refreshInFlight.current = false;
       if (refreshQueued.current) {
