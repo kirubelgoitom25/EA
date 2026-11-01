@@ -70,7 +70,7 @@ class Lesson(Base):
         String, ForeignKey("modules.id", ondelete="CASCADE"), nullable=False
     )
     title = Column(String, nullable=False)
-    duration = Column(String, nullable=False)
+    duration = Column(String, nullable=True)
     video_url = Column(String, nullable=True)
     sort_order = Column(Integer, nullable=False, default=0)
 
