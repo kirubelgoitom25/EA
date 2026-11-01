@@ -67,3 +67,69 @@ class ParseErrorOut(BaseModel):
 class QuizParseOut(BaseModel):
     questions: list[ParsedQuizQuestion]
     errors: list[ParseErrorOut]
+
+
+# ---- practice --------------------------------------------------------------
+
+
+class PracticeItemIn(StrictIn):
+    type: str
+    question: str
+    sentence: Optional[str] = None
+    options: Optional[list[str]] = None
+    correct_index: Optional[StrictInt] = None
+    answer: Optional[str] = None
+    explanation: Optional[str] = None
+
+
+class PracticeItemCreateIn(PracticeItemIn):
+    practice_title: Optional[str] = None
+
+
+class PracticeBulkIn(StrictIn):
+    items: list[PracticeItemIn]
+    practice_title: Optional[str] = None
+
+
+class PracticeOrderIn(StrictIn):
+    item_ids: list[StrictInt]
+
+
+class PracticeTitleIn(StrictIn):
+    title: str
+
+
+class PracticeItemOut(BaseModel):
+    id: int
+    type: str
+    question: str
+    sentence: Optional[str] = None
+    options: Optional[list[str]] = None
+    correct_index: Optional[int] = None
+    answer: Optional[str] = None
+    explanation: Optional[str] = None
+    sort_order: int
+
+
+class TeacherPracticeOut(BaseModel):
+    lesson_id: str
+    practice_id: Optional[int] = None
+    title: Optional[str] = None
+    max_items: int
+    items: list[PracticeItemOut]
+
+
+class ParsedPracticeItem(BaseModel):
+    number: int
+    type: str
+    question: str
+    sentence: Optional[str] = None
+    options: Optional[list[str]] = None
+    correct_index: Optional[int] = None
+    answer: Optional[str] = None
+    explanation: Optional[str] = None
+
+
+class PracticeParseOut(BaseModel):
+    items: list[ParsedPracticeItem]
+    errors: list[ParseErrorOut]

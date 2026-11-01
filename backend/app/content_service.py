@@ -13,8 +13,16 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from app import content_access
-from app.content_rules import MAX_QUIZ_QUESTIONS, clean_quiz_question
-from app.models import Quiz, QuizQuestion
+from app.content_rules import (
+    MAX_PRACTICE_ITEMS,
+    MAX_QUIZ_QUESTIONS,
+    MAX_TITLE_LEN,
+    clean_practice_item,
+    clean_quiz_question,
+    clean_text,
+    clean_title,
+)
+from app.models import Practice, PracticeItem, Quiz, QuizQuestion
 
 log = logging.getLogger("ea.teacher_content")
 
@@ -222,3 +230,216 @@ def reorder_questions(
 
     _log(teacher_id, "quiz_reordered", f"quiz={quiz_id}")
     return _quiz_out(db, lesson_id)
+
+
+# ---- practice --------------------------------------------------------------
+
+PRACTICE_HAS_ATTEMPTS = text("select 1 from practice_attempts where practice_id = :id limit 1")
+
+
+def _item_out(item: PracticeItem) -> dict:
+    return {
+        "id": item.id,
+        "type": item.type,
+        "question": item.question,
+        "sentence": item.sentence,
+        "options": item.options,
+        "correct_index": item.correct_index,
+        "answer": item.answer,
+        "explanation": item.explanation,
+        "sort_order": item.sort_order,
+    }
+
+
+def _practice_out(db: Session, lesson_id: str) -> dict:
+    practice = db.execute(
+        select(Practice).where(Practice.lesson_id == lesson_id)
+    ).scalar_one_or_none()
+    items = []
+    if practice is not None:
+        rows = db.execute(
+            select(PracticeItem)
+            .where(PracticeItem.practice_id == practice.id)
+            .order_by(PracticeItem.sort_order, PracticeItem.id)
+        ).scalars()
+        items = [_item_out(item) for item in rows]
+    return {
+        "lesson_id": lesson_id,
+        "practice_id": practice.id if practice else None,
+        "title": practice.title if practice else None,
+        "max_items": MAX_PRACTICE_ITEMS,
+        "items": items,
+    }
+
+
+def _lock_practice(db: Session, lesson_id: str, title: str) -> Practice:
+    """Same idea as _lock_quiz. The title only matters when it is created."""
+    db.execute(
+        pg_insert(Practice)
+        .values(lesson_id=lesson_id, title=title)
+        .on_conflict_do_nothing(index_elements=["lesson_id"])
+    )
+    return db.execute(
+        select(Practice).where(Practice.lesson_id == lesson_id).with_for_update()
+    ).scalar_one()
+
+
+def get_practice(db: Session, teacher_id: uuid.UUID, lesson_id: str) -> dict:
+    content_access.get_lesson(db, teacher_id, lesson_id)
+    return _practice_out(db, lesson_id)
+
+
+def _clean_item(values: dict) -> dict:
+    return clean_practice_item(
+        values.get("type"),
+        values.get("question"),
+        values.get("sentence"),
+        values.get("options"),
+        values.get("correct_index"),
+        values.get("answer"),
+        values.get("explanation"),
+    )
+
+
+def add_items(
+    db: Session,
+    teacher_id: uuid.UUID,
+    lesson_id: str,
+    items: list[dict],
+    practice_title=None,
+) -> list[dict]:
+    lesson = content_access.get_lesson(db, teacher_id, lesson_id)
+    if not items:
+        raise HTTPException(status_code=422, detail="There are no items to save")
+
+    cleaned = [_clean_item(item) for item in items]
+    title = clean_text(practice_title, "Practice title", MAX_TITLE_LEN, required=False)
+    title = title or f"{lesson.title} practice"[:MAX_TITLE_LEN]
+
+    with transaction(db):
+        practice = _lock_practice(db, lesson_id, title)
+        practice_id = practice.id
+        current, highest = db.execute(
+            select(func.count(PracticeItem.id), func.coalesce(func.max(PracticeItem.sort_order), -1))
+            .where(PracticeItem.practice_id == practice_id)
+        ).one()
+        if current + len(cleaned) > MAX_PRACTICE_ITEMS:
+            raise HTTPException(
+                status_code=422,
+                detail=f"A practice can have at most {MAX_PRACTICE_ITEMS} items (it has {current})",
+            )
+
+        created = []
+        for offset, values in enumerate(cleaned, start=1):
+            row = PracticeItem(practice_id=practice_id, sort_order=highest + offset, **values)
+            db.add(row)
+            created.append(row)
+        db.flush()
+        result = [_item_out(row) for row in created]
+
+    _log(teacher_id, "practice_items_added", f"practice={practice_id} count={len(result)}")
+    return result
+
+
+def update_item(db: Session, teacher_id: uuid.UUID, item_id: int, values: dict) -> dict:
+    content_access.get_practice_item(db, teacher_id, item_id)
+    cleaned = _clean_item(values)
+
+    with transaction(db):
+        row = db.execute(
+            select(PracticeItem).where(PracticeItem.id == item_id).with_for_update()
+        ).scalar_one_or_none()
+        if row is None:
+            raise HTTPException(status_code=404, detail="Item not found")
+        for field, value in cleaned.items():
+            setattr(row, field, value)
+        db.flush()
+        result = _item_out(row)
+
+    _log(teacher_id, "practice_item_updated", item_id)
+    return result
+
+
+def delete_item(db: Session, teacher_id: uuid.UUID, item_id: int) -> None:
+    found = content_access.get_practice_item(db, teacher_id, item_id)
+
+    with transaction(db):
+        practice = db.execute(
+            select(Practice).where(Practice.id == found.practice_id).with_for_update()
+        ).scalar_one_or_none()
+        if practice is None:
+            raise HTTPException(status_code=404, detail="Item not found")
+
+        remaining = db.execute(
+            select(func.count(PracticeItem.id)).where(PracticeItem.practice_id == practice.id)
+        ).scalar_one()
+
+        if remaining <= 1:
+            # Deleting the practice row also deletes every student's attempts.
+            if db.execute(PRACTICE_HAS_ATTEMPTS, {"id": practice.id}).first() is not None:
+                raise HTTPException(
+                    status_code=409,
+                    detail="This practice has student attempts and cannot be left empty. Edit the item instead.",
+                )
+            db.execute(delete(Practice).where(Practice.id == practice.id))
+        else:
+            db.execute(delete(PracticeItem).where(PracticeItem.id == item_id))
+
+    _log(teacher_id, "practice_item_deleted", item_id)
+
+
+def reorder_items(
+    db: Session, teacher_id: uuid.UUID, lesson_id: str, item_ids: list[int]
+) -> dict:
+    content_access.get_lesson(db, teacher_id, lesson_id)
+
+    with transaction(db):
+        practice = db.execute(
+            select(Practice).where(Practice.lesson_id == lesson_id).with_for_update()
+        ).scalar_one_or_none()
+        if practice is None:
+            raise HTTPException(status_code=422, detail="This lesson has no practice yet")
+
+        current = set(
+            db.execute(
+                select(PracticeItem.id).where(PracticeItem.practice_id == practice.id)
+            ).scalars()
+        )
+        if len(item_ids) != len(set(item_ids)) or set(item_ids) != current:
+            raise HTTPException(
+                status_code=422,
+                detail="The order must list every item of the practice exactly once",
+            )
+
+        positions = case(
+            {item_id: position for position, item_id in enumerate(item_ids)},
+            value=PracticeItem.id,
+        )
+        db.execute(
+            update(PracticeItem)
+            .where(PracticeItem.id.in_(item_ids))
+            .values(sort_order=positions)
+        )
+        practice_id = practice.id
+
+    _log(teacher_id, "practice_reordered", f"practice={practice_id}")
+    return _practice_out(db, lesson_id)
+
+
+def set_practice_title(
+    db: Session, teacher_id: uuid.UUID, lesson_id: str, title
+) -> dict:
+    content_access.get_lesson(db, teacher_id, lesson_id)
+    cleaned = clean_title(title)
+
+    with transaction(db):
+        practice = db.execute(
+            select(Practice).where(Practice.lesson_id == lesson_id).with_for_update()
+        ).scalar_one_or_none()
+        if practice is None:
+            raise HTTPException(status_code=404, detail="Practice not found")
+        practice.title = cleaned
+        practice_id = practice.id
+
+    _log(teacher_id, "practice_title_updated", practice_id)
+    return _practice_out(db, lesson_id)
