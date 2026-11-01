@@ -15,6 +15,7 @@ import StudentPage from "./pages/StudentPage.jsx";
 import Rankings from "./pages/Rankings.jsx";
 import Content from "./pages/Content.jsx";
 import QuizEditor from "./pages/QuizEditor.jsx";
+import PracticeEditor from "./pages/PracticeEditor.jsx";
 import "./App.css";
 
 // The route guard is for convenience only. The backend checks the token on every request.
@@ -42,6 +43,10 @@ export default function App() {
               <Route
                 path="/content/lessons/:lessonId/quiz"
                 element={<QuizEditor />}
+              />
+              <Route
+                path="/content/lessons/:lessonId/practice"
+                element={<PracticeEditor />}
               />
             </Route>
           </Route>

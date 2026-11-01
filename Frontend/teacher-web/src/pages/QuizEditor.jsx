@@ -8,14 +8,9 @@ import {
   Pencil,
   Plus,
   Trash2,
-  X,
 } from "lucide-react";
 import { api } from "../lib/api.js";
-
-// The letters are only for display. The server stores the position (0 = a).
-const LETTERS = "abcdef";
-const MIN_OPTIONS = 2;
-const MAX_OPTIONS = 6;
+import OptionRows, { LETTERS } from "../components/OptionRows.jsx";
 
 const PASTE_EXAMPLE = `1. What is 2+2?
 a. 3
@@ -91,43 +86,14 @@ function QuestionForm({ initial, submitLabel, onSubmit, onCancel, onDirty }) {
         />
       </label>
 
-      <div className="field">
-        <span className="label">Options (tick the correct one)</span>
-        {options.map((option, index) => (
-          <div className="option-row" key={index}>
-            <input
-              type="radio"
-              name="correct"
-              checked={correct === index}
-              onChange={() => touch(setCorrect)(index)}
-              aria-label={`Option ${LETTERS[index]} is correct`}
-            />
-            <span className="letter">{LETTERS[index]}</span>
-            <input
-              className="input"
-              value={option}
-              onChange={(e) => setOption(index, e.target.value)}
-              placeholder={`Option ${LETTERS[index]}`}
-              maxLength={200}
-            />
-            <button
-              type="button"
-              className="icon-btn"
-              onClick={() => removeOption(index)}
-              disabled={options.length <= MIN_OPTIONS}
-              aria-label={`Remove option ${LETTERS[index]}`}
-            >
-              <X size={16} />
-            </button>
-          </div>
-        ))}
-        {options.length < MAX_OPTIONS && (
-          <button type="button" className="btn-text" onClick={addOption}>
-            <Plus size={16} />
-            Add option
-          </button>
-        )}
-      </div>
+      <OptionRows
+        options={options}
+        correct={correct}
+        onChangeOption={setOption}
+        onPickCorrect={touch(setCorrect)}
+        onAdd={addOption}
+        onRemove={removeOption}
+      />
 
       <label className="field">
         <span className="label">Explanation (optional)</span>

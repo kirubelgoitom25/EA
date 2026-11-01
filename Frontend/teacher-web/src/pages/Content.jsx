@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { ChevronRight, ListChecks } from "lucide-react";
+import { Dumbbell, ListChecks } from "lucide-react";
 import { api } from "../lib/api.js";
 
 export default function Content() {
@@ -67,20 +67,25 @@ export default function Content() {
                   <p className="empty-inline">No lessons in this module.</p>
                 )}
                 {module.lessons.map((lesson) => (
-                  <Link
-                    className="row row-link"
-                    to={`/content/lessons/${encodeURIComponent(lesson.id)}/quiz`}
-                    key={lesson.id}
-                  >
+                  <div className="row" key={lesson.id}>
                     <div className="who">
                       <span className="name">{lesson.title}</span>
                     </div>
-                    <span className="pill">
+                    <Link
+                      className="pill pill-link"
+                      to={`/content/lessons/${encodeURIComponent(lesson.id)}/quiz`}
+                    >
                       <ListChecks size={13} />
                       Quiz
-                    </span>
-                    <ChevronRight size={20} className="chev" />
-                  </Link>
+                    </Link>
+                    <Link
+                      className="pill pill-link"
+                      to={`/content/lessons/${encodeURIComponent(lesson.id)}/practice`}
+                    >
+                      <Dumbbell size={13} />
+                      Practice
+                    </Link>
+                  </div>
                 ))}
               </div>
             ))}

@@ -847,3 +847,37 @@
     flex-wrap: wrap;
   }
 }
+.pill-link {
+  text-decoration: none;
+  border: 1.5px solid var(--soft);
+  transition: background 0.15s;
+}
+.pill-link:hover {
+  background: var(--soft);
+}
+.q-main > .pill {
+  margin-bottom: 8px;
+}
+.q-sentence {
+  margin-top: 4px;
+  color: var(--text-secondary);
+  font-style: italic;
+  overflow-wrap: anywhere;
+}
+.q-answer {
+  margin-top: 10px;
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+.title-row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 16px;
+}
+.title-row .input {
+  flex: 1;
+}
