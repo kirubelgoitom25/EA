@@ -311,7 +311,7 @@ export async function fetchPracticeByLessonId(lessonId) {
         // "choose", and the correct text for "fill".
         answer: item.type === "choose" ? item.correct_index : item.answer,
 
-        // Pass the explanation from the backend to PracticeScreen.
+        // Shown after the student answers.
         explanation: item.explanation,
       })),
     };
@@ -343,6 +343,43 @@ export async function submitPractice(lessonId, answers) {
     xpPossible: Number(result.xp_possible),
     isFirstCompletion: result.is_first_completion,
   };
+}
+
+// ---- Lesson activities (Course Studio) -----------------------------------------------
+
+// The lesson's ordered activities. Returns null when the server has none to give (a lesson that
+// is not open to this student, or a server without Course Studio yet), so older chapters keep
+// working exactly as before.
+export async function fetchLessonActivities(lessonId) {
+  try {
+    const result = await request(`${lessonPath(lessonId)}/activities`);
+    return {
+      lessonCompleted: result.lesson_completed,
+      activities: result.activities.map((activity) => ({
+        id: activity.id,
+        kind: activity.kind,
+        title: activity.title,
+        isRequired: activity.is_required,
+        completed: activity.completed,
+        ready: activity.ready,
+        videoUrl: activity.video_url,
+        readingBody: activity.reading_body,
+      })),
+    };
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 404) {
+      return null;
+    }
+    throw error;
+  }
+}
+
+// The explicit "Mark complete" for a video or reading. Opening one never counts.
+export async function completeActivity(activityId) {
+  const result = await request(`/activities/${encodeURIComponent(activityId)}/complete`, {
+    method: "POST",
+  });
+  return { completed: result.completed, lessonCompleted: result.lesson_completed };
 }
 
 // ---- Presence -------------------------------------------------------------

@@ -1,112 +1,199 @@
-import React, {
-  createContext,
-  useCallback,
-  useContext,
-  useEffect,
-  useMemo,
-  useState,
-} from "react";
-import AsyncStorage from "@react-native-async-storage/async-storage";
+import React, { createContext, useContext } from "react";
 
-const STORAGE_KEY = "app_theme_id";
-export const DEFAULT_THEME_ID = "peach";
+// EA's look: "Ember Trail" — learning as a trail through the fox's world.
+//
+// - Ground is light (#FAFBFB — exactly the fox artwork's background, so the
+//   fox only ever sits on `bg`).
+// - Ember (the fox's orange) is the main action colour. Text on it is dark
+//   ink: white on ember fails contrast.
+// - The Tail (orange → magenta, the fox's tail) is reserved for progress,
+//   streaks and rewards. Never for buttons or decoration.
+// - Plum is the one deep surface, used once per screen at most (Home's
+//   Continue card).
+// - Fern / clay are for answer feedback only.
+export const tokens = {
+  bg: "#FAFBFB",
+  surface: "#FFFFFF",
 
-// Everything that does NOT change between themes (feedback colors, text,
-// locked states, etc.). Only the brand + background keys are overridden.
-const baseColors = {
-  yellow: "#FFC857",
-  yellowDeep: "#E0A82C",
+  text: "#22152B", // plum ink
+  textSecondary: "#6B6170",
+  textTertiary: "#857A8C", // placeholders and disabled states only
 
-  mint: "#42C98A",
-  mintLight: "#EAFBF3",
+  divider: "#ECEAEE",
+  neutralTint: "#F1EFF3", // empty stones, tracks
+  mist: "#F3EEF6", // notes and explanations
 
-  blue: "#5B8DEF",
-  blueLight: "#EDF3FF",
+  accent: "#F49200", // ember
+  accentPressed: "#E08600",
+  accentText: "#B45309", // small orange text and links
+  accentTint: "#FFF1DE",
+  onAccent: "#22152B",
+  onAccentStrong: "#FFFFFF", // primary button label
+  accentLip: "#C96A00", // pressed-in edge of solid orange
+  buttonFace: "#EFE7DA", // primary button: warm sand
+  buttonFacePressed: "#E6DCCB",
+  buttonLip: "#DCCFBB", // primary button: its raised bottom edge
+  buttonInk: "#2A2230", // primary button label
 
-  red: "#EF5350",
-  redLight: "#FDEAEA",
+  tailStart: "#F49200",
+  tailMid: "#E8687E",
+  tailEnd: "#DE468E",
 
-  purple: "#B98CFF",
-  purpleDark: "#9A74E8",
+  plum: "#2B1A38",
+  plumHill: "#4E3060",
+  plumSky: "#3A2448",
+  plumTrack: "#46305A",
+  onPlum: "#FFF7EE",
+  onPlumSecondary: "#CDBFD6",
 
-  text: "#24201E",
-  textSecondary: "#756C67",
-  textMuted: "#A69D97",
-  card: "#FFFFFF",
-
-  // Quiz feedback: real green for correct answers (never themed)
-  correct: "#42C98A",
-  correctBg: "#EAFBF3",
-  correctDark: "#2FA871",
-
-  gold: "#FFC857",
-  goldDark: "#E0A82C",
-  blueDark: "#4F7EE0",
-  blueLightAlt: "#EDF3FF",
-  redDark: "#D84E4E",
-  redLightAlt: "#FDEAEA",
-  locked: "#D9D2CE",
-  lockedDark: "#C3B9B4",
+  correct: "#1A7A50", // fern
+  correctTint: "#E6F4EC",
+  wrong: "#C2412D", // clay — borders and icons
+  wrongText: "#A8361F", // clay for text (contrast)
+  wrongTint: "#FBEAE6",
 };
 
-/**
- * Each theme defines:
- *  primary / deep  -> main brand color and its darker "depth" shade
- *  light / soft    -> pale tints for chips, icon circles, selected states
- *  bg / bgAlt      -> screen background and a slightly deeper surface
- *  border / borderStrong / shadow -> tinted neutrals so cards feel cohesive
- */
-export const themes = [
-  { id: "peach", name: "Peach", primary: "#FF7A45", deep: "#E85D2A", light: "#FFF0E8", soft: "#FFE7D8", bg: "#FFF9F5", bgAlt: "#FFF3EC", border: "#EEE5DF", borderStrong: "#E1D6CF", shadow: "#E9DED6" },
-  { id: "apricot", name: "Apricot", primary: "#F5A25A", deep: "#DB8438", light: "#FEF3E7", soft: "#FCE6CD", bg: "#FFFBF6", bgAlt: "#FEF4E9", border: "#F1E6D8", borderStrong: "#E4D5C1", shadow: "#EADDCB" },
-  { id: "coral", name: "Coral", primary: "#F5837A", deep: "#DE6459", light: "#FEEEEC", soft: "#FCDDD9", bg: "#FFF8F7", bgAlt: "#FEF0EE", border: "#F1E0DE", borderStrong: "#E4CDCA", shadow: "#EBD9D6" },
-  { id: "rose", name: "Rose", primary: "#F27A9B", deep: "#DB5C80", light: "#FDECF1", soft: "#FAD9E4", bg: "#FFF8FA", bgAlt: "#FDEFF3", border: "#F0DFE5", borderStrong: "#E4CCD5", shadow: "#ECD8DF" },
-  { id: "bubblegum", name: "Bubblegum", primary: "#F58CC8", deep: "#DD6DAE", light: "#FEEEF7", soft: "#FCDDEF", bg: "#FFF8FC", bgAlt: "#FEF0F8", border: "#F2E0EB", borderStrong: "#E6CCDB", shadow: "#EDD8E5" },
-  { id: "orchid", name: "Orchid", primary: "#D391E8", deep: "#B972D0", light: "#F9EEFD", soft: "#F2DDFA", bg: "#FDF8FF", bgAlt: "#F9F0FC", border: "#EDE0F2", borderStrong: "#DFCCE6", shadow: "#E6D6EC" },
-  { id: "lavender", name: "Lavender", primary: "#A98BF0", deep: "#8B6BD9", light: "#F1ECFD", soft: "#E4DAFA", bg: "#FAF8FF", bgAlt: "#F3EFFD", border: "#E6E0F2", borderStrong: "#D5CCE6", shadow: "#DDD5EC" },
-  { id: "periwinkle", name: "Periwinkle", primary: "#7D8CF0", deep: "#616FDA", light: "#EEF0FE", soft: "#DDE1FB", bg: "#F8F9FF", bgAlt: "#F0F2FE", border: "#E1E4F3", borderStrong: "#CFD3E8", shadow: "#D8DBEC" },
-  { id: "sky", name: "Sky", primary: "#5BB4F0", deep: "#3A94D6", light: "#EAF6FE", soft: "#D6ECFC", bg: "#F5FAFF", bgAlt: "#EDF6FE", border: "#DDE9F2", borderStrong: "#CBDCE9", shadow: "#D3E1EC" },
-  { id: "aqua", name: "Aqua", primary: "#3EC6D0", deep: "#22A6B1", light: "#E6F8FA", soft: "#CDF0F3", bg: "#F4FCFD", bgAlt: "#E9F8FA", border: "#D8EBEE", borderStrong: "#C4DDE1", shadow: "#CFE3E6" },
-  { id: "teal", name: "Teal", primary: "#4DB6AC", deep: "#349A90", light: "#E6F6F4", soft: "#CFEDE9", bg: "#F4FBFA", bgAlt: "#E9F6F4", border: "#D8EAE7", borderStrong: "#C4DDD9", shadow: "#CFE2DF" },
-  { id: "mint", name: "Mint", primary: "#4FC9A0", deep: "#33AE85", light: "#E8F9F3", soft: "#D2F2E6", bg: "#F5FCF9", bgAlt: "#ECF8F3", border: "#DBEBE4", borderStrong: "#C8DDD4", shadow: "#D0E3DB" },
-  { id: "sage", name: "Sage", primary: "#8FB38A", deep: "#739A6E", light: "#F0F6EE", soft: "#E0EDDC", bg: "#F8FBF7", bgAlt: "#F0F6EE", border: "#E0E9DD", borderStrong: "#CEDACA", shadow: "#D6E0D3" },
-  { id: "lime", name: "Lime", primary: "#9BCB3F", deep: "#7EAE24", light: "#F3F9E4", soft: "#E5F1C6", bg: "#FBFDF5", bgAlt: "#F4F9E8", border: "#E5EDD3", borderStrong: "#D3DEBC", shadow: "#DAE4C6" },
-  { id: "lemon", name: "Lemon", primary: "#EDB81A", deep: "#CF9D0C", light: "#FEF7DC", soft: "#FCEFB8", bg: "#FFFDF3", bgAlt: "#FEF9E4", border: "#EFE8CF", borderStrong: "#E2D9B8", shadow: "#E8E0C4" },
-  { id: "sand", name: "Sand", primary: "#C9A57A", deep: "#AE8859", light: "#F8F1E8", soft: "#F0E4D3", bg: "#FDFBF7", bgAlt: "#F8F3EB", border: "#EAE2D6", borderStrong: "#DBD0BF", shadow: "#E2D9CB" },
-  { id: "cloud", name: "Cloud", primary: "#8DA2B8", deep: "#71879E", light: "#EFF3F7", soft: "#E0E8EF", bg: "#F8FAFC", bgAlt: "#F0F4F8", border: "#E1E7ED", borderStrong: "#CFD8E1", shadow: "#D8E0E8" },
-];
+// The path screens (Home, a course, a chapter) are neutral: warm off-white ground, stone rocks, and
+// colour only where it means something: moss for what is done, ember for where you are.
+export const stone = {
+  bg: "#F4F2EE",
+  dot: "#E4E0D7", // the dot grid
+  line: "#CFCABF", // the dotted path ahead
+  moss: "#6F9C7F", // done
+  mossEdge: "#4F7A5E",
+  mossLight: "#8DB79B",
+  rock: "#DCD8CF", // a rock still ahead
+  rockEdge: "#BFBAAF",
+  rockLight: "#EDEAE3",
+  rockInk: "#8C877D",
+  // domes (a part's end, and the den) are slate blue, so they are never mistaken for rocks
+  den: "#6F86A6",
+  denEdge: "#51688A",
+  denLight: "#93A8C4",
+  denOff: "#C9D1DC",
+  denOffEdge: "#AAB4C2",
+  denOffLight: "#E3E8EF",
+  denOffDoor: "#5E6A7C",
+  here: "#F1EEE8", // the rock you are on
+  hereEdge: "#CFCABF",
+};
 
-export const buildColors = (theme) => ({
-  ...baseColors,
+// The Tail as gradient stops (for expo-linear-gradient / SVG).
+export const TAIL = [tokens.tailStart, tokens.tailMid, tokens.tailEnd];
 
-  // Brand (screens use both the "orange" and "green" names for the brand)
-  orange: theme.primary,
-  orangeDeep: theme.deep,
-  orangeLight: theme.light,
-  orangeSoft: theme.soft,
+// Colour at position t (0..1) along the Tail — for segmented progress.
+export function tailAt(t) {
+  const clamp = Math.max(0, Math.min(1, t));
+  const hex = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
+  const [a, b] = clamp < 0.5 ? [tokens.tailStart, tokens.tailMid] : [tokens.tailMid, tokens.tailEnd];
+  const local = clamp < 0.5 ? clamp * 2 : (clamp - 0.5) * 2;
+  const ca = hex(a);
+  const cb = hex(b);
+  const mix = ca.map((v, i) => Math.round(v + (cb[i] - v) * local));
+  return `#${mix.map((v) => v.toString(16).padStart(2, "0")).join("")}`;
+}
 
-  green: theme.primary,
-  greenDark: theme.deep,
-  greenLight: theme.light,
-  greenBg: theme.light,
+// Custom fonts carry their weight in the family name, so never set
+// fontWeight next to these (Android would fall back to the system font).
+export const fonts = {
+  regular: "Inter_400Regular",
+  semibold: "Inter_600SemiBold",
+  display: "BricolageGrotesque_700Bold",
+};
 
-  // Surfaces + neutrals
-  bg: theme.bg,
-  screenBg: theme.bg,
-  bgSecondary: theme.bgAlt,
-  bgMuted: theme.bgAlt,
-  border: theme.border,
-  borderStrong: theme.borderStrong,
-  shadow: theme.shadow,
-});
+export const type = {
+  hero: { fontFamily: fonts.display, fontSize: 64, lineHeight: 68, letterSpacing: -1.5 },
+  display: { fontFamily: fonts.display, fontSize: 32, lineHeight: 36, letterSpacing: -0.6 },
+  title: { fontFamily: fonts.display, fontSize: 24, lineHeight: 30, letterSpacing: -0.3 },
+  answer: { fontFamily: fonts.display, fontSize: 22, lineHeight: 28 },
+  body: { fontFamily: fonts.regular, fontSize: 16, lineHeight: 24 },
+  bodyStrong: { fontFamily: fonts.semibold, fontSize: 16, lineHeight: 24 },
+  label: { fontFamily: fonts.semibold, fontSize: 14, lineHeight: 20 },
+  caption: { fontFamily: fonts.regular, fontSize: 12, lineHeight: 16 },
+  overline: { fontFamily: fonts.semibold, fontSize: 12, lineHeight: 16, letterSpacing: 1.2 },
+};
 
-const getTheme = (id) =>
-  themes.find((item) => item.id === id) ||
-  themes.find((item) => item.id === DEFAULT_THEME_ID);
+// 4-pt spacing scale
+export const space = {
+  xs: 4,
+  sm: 8,
+  md: 12,
+  lg: 16,
+  xl: 24,
+  xxl: 32,
+  xxxl: 48,
+  huge: 64,
+};
 
-// Static default export, kept so any screen that hasn't been converted to
-// useTheme() yet keeps working (it just won't change with the picker).
-export const colors = buildColors(getTheme(DEFAULT_THEME_ID));
+export const layout = {
+  gutter: space.xl,
+  buttonHeight: 56,
+  radius: 18, // buttons
+  tileRadius: 24, // answer tiles, cards
+  stoneRadius: 24,
+};
+
+// Durations in ms. Motion is for answer feedback and progress only.
+export const motion = {
+  fast: 150,
+  base: 250,
+};
+
+// ---------- Legacy names ----------
+// Screens that haven't been redesigned yet still read these names. They
+// all point at the EA palette, so those screens follow the brand without
+// changes. New code should use `tokens`.
+export const colors = {
+  orange: tokens.accent,
+  orangeDeep: tokens.accentPressed,
+  orangeLight: tokens.accentTint,
+  orangeSoft: tokens.accentTint,
+
+  green: tokens.accent,
+  greenDark: tokens.accentPressed,
+  greenLight: tokens.accentTint,
+  greenBg: tokens.accentTint,
+
+  bg: tokens.bg,
+  screenBg: tokens.bg,
+  bgSecondary: tokens.neutralTint,
+  bgMuted: tokens.neutralTint,
+  card: tokens.surface,
+  border: tokens.divider,
+  borderStrong: tokens.divider,
+  shadow: tokens.divider,
+
+  text: tokens.text,
+  textSecondary: tokens.textSecondary,
+  textMuted: tokens.textTertiary,
+
+  correct: tokens.correct,
+  correctBg: tokens.correctTint,
+  correctDark: tokens.correct,
+  mint: tokens.correct,
+  mintLight: tokens.correctTint,
+
+  red: tokens.wrong,
+  redDark: tokens.wrongText,
+  redLight: tokens.wrongTint,
+  redLightAlt: tokens.wrongTint,
+
+  yellow: tokens.accent,
+  yellowDeep: tokens.accentPressed,
+  gold: tokens.accent,
+  goldDark: tokens.accentPressed,
+
+  blue: tokens.textSecondary,
+  blueDark: tokens.text,
+  blueLight: tokens.neutralTint,
+  blueLightAlt: tokens.neutralTint,
+
+  purple: tokens.plumHill,
+  purpleDark: tokens.plum,
+
+  locked: tokens.divider,
+  lockedDark: tokens.textTertiary,
+};
 
 export const radius = {
   sm: 12,
@@ -116,92 +203,13 @@ export const radius = {
   full: 999,
 };
 
-export const shadows = {
-  soft: {
-    shadowColor: "#E3D4CC",
-    shadowOpacity: 0.3,
-    shadowRadius: 16,
-    shadowOffset: { width: 0, height: 10 },
-    elevation: 6,
-  },
-  card: {
-    shadowColor: "#E9D9CF",
-    shadowOpacity: 0.22,
-    shadowRadius: 14,
-    shadowOffset: { width: 0, height: 8 },
-    elevation: 4,
-  },
-};
-
-export const chunky = (baseColor, depthColor) => ({
-  backgroundColor: baseColor,
-  borderBottomWidth: 4,
-  borderBottomColor: depthColor,
-  borderRadius: radius.md,
-});
-
 // ---------- Provider ----------
 
-const ThemeContext = createContext({
-  themeId: DEFAULT_THEME_ID,
-  theme: getTheme(DEFAULT_THEME_ID),
-  colors,
-  themes,
-  setThemeId: () => {},
-});
+const theme = { colors, tokens };
+const ThemeContext = createContext(theme);
 
 export function ThemeProvider({ children }) {
-  const [themeId, setThemeIdState] = useState(DEFAULT_THEME_ID);
-  const [ready, setReady] = useState(false);
-
-  // Restore the saved theme once on launch.
-  useEffect(() => {
-    let cancelled = false;
-
-    (async () => {
-      try {
-        const saved = await AsyncStorage.getItem(STORAGE_KEY);
-        if (!cancelled && saved && themes.some((item) => item.id === saved)) {
-          setThemeIdState(saved);
-        }
-      } catch (error) {
-        // Storage failure is not fatal; fall back to the default theme.
-      } finally {
-        if (!cancelled) setReady(true);
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  const setThemeId = useCallback(async (id) => {
-    if (!themes.some((item) => item.id === id)) return;
-
-    setThemeIdState(id);
-    try {
-      await AsyncStorage.setItem(STORAGE_KEY, id);
-    } catch (error) {
-      // Ignore: the theme still applies for this session.
-    }
-  }, []);
-
-  const value = useMemo(() => {
-    const theme = getTheme(themeId);
-    return {
-      themeId,
-      theme,
-      colors: buildColors(theme),
-      themes,
-      setThemeId,
-    };
-  }, [themeId, setThemeId]);
-
-  // Avoid flashing the default theme before the saved one loads.
-  if (!ready) return null;
-
-  return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;
+  return <ThemeContext.Provider value={theme}>{children}</ThemeContext.Provider>;
 }
 
 export const useTheme = () => useContext(ThemeContext);

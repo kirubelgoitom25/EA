@@ -1,14 +1,23 @@
 import { registerRootComponent } from 'expo';
 import React from 'react';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { StatusBar } from 'expo-status-bar';
 
 import App from './App';
 import { ThemeProvider } from './theme';
+import { FoxProvider } from './components/ui/FoxContext';
 
 function AppRoot() {
 	return (
-		<ThemeProvider>
-			<App />
-		</ThemeProvider>
+		<SafeAreaProvider>
+			<ThemeProvider>
+				{/* Dark status-bar icons: every EA screen has a light background. */}
+				<StatusBar style="dark" />
+				<FoxProvider>
+					<App />
+				</FoxProvider>
+			</ThemeProvider>
+		</SafeAreaProvider>
 	);
 }
 

@@ -10,19 +10,29 @@ import {
   ActivityIndicator,
   StyleSheet,
   Alert,
-  LogBox,
   AppState,
+  BackHandler,
 } from "react-native";
+import {
+  useFonts,
+  Inter_400Regular,
+  Inter_600SemiBold,
+} from "@expo-google-fonts/inter";
+import { BricolageGrotesque_700Bold } from "@expo-google-fonts/bricolage-grotesque";
 
 import LoginScreen from "./components/LoginScreen";
 import HomeScreen from "./components/HomeScreen";
 import ProfileScreen from "./components/ProfileScreen";
 import CoursesScreen from "./components/CoursesScreen";
+import ExploreScreen from "./components/ExploreScreen";
 import CourseScreen from "./components/CourseScreen";
-import LessonScreen from "./components/LessonScreen";
-import QuizScreen from "./components/QuizScreen";
 import RankingScreen from "./components/RankingScreen";
-import PracticeScreen from "./components/PracticeScreen";
+import ChapterPathScreen from "./components/ChapterPathScreen";
+import ActivityScreen from "./components/ActivityScreen";
+import JourneyMoment from "./components/JourneyMoment";
+import StageSession from "./components/session/StageSession";
+import { flattenChapters, nextChapter } from "./components/session/sessionModel";
+import { loadMyCourseIds, saveMyCourseIds } from "./services/myCourses";
 
 import { supabase } from "./lib/supabase";
 import {
@@ -33,18 +43,38 @@ import {
   fetchCourses,
   fetchRanking,
   sendHeartbeat,
+  fetchLessonActivities,
 } from "./services/api";
+import { buildSteps } from "./services/activitySteps";
+import { hasSeen, markSeen } from "./services/journey";
+import { chapterWord, isFreshCourse } from "./services/journeyModel";
 import { useTheme } from "./theme";
-
-LogBox.ignoreAllLogs();
+import {
+  HOME,
+  LOGIN,
+  back,
+  currentScreen,
+  push,
+  switchTab,
+} from "./navigation";
 
 const EMPTY_RANKING = { entries: [], yourPosition: null, yourXp: 0 };
 
 export default function App() {
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
+  // Inter is the EA typeface. If it fails to load the app still works,
+  // with the system font.
+  const [fontsLoaded, fontError] = useFonts({
+    Inter_400Regular,
+    Inter_600SemiBold,
+    BricolageGrotesque_700Bold,
+  });
+
   const [user, setUser] = useState(null);
-  const [screen, setScreen] = useState("login");
+  // Screen history (see navigation.js). The last entry is on screen.
+  const [stack, setStack] = useState([LOGIN]);
+  const screen = currentScreen(stack);
   const [restoring, setRestoring] = useState(true);
 
   const [student, setStudent] = useState(null);
@@ -56,6 +86,14 @@ export default function App() {
 
   const [selectedCourse, setSelectedCourse] = useState(null);
   const [selectedLesson, setSelectedLesson] = useState(null);
+  // A video or reading of the open chapter (Course Studio).
+  const [selectedActivity, setSelectedActivity] = useState(null);
+  // Where that activity sits in its chapter, and what follows it (set when it is opened).
+  const [activityTrail, setActivityTrail] = useState({ context: null, next: null });
+  // Stage to open (index), or null for "the next one not done".
+  const [selectedStage, setSelectedStage] = useState(null);
+  // Courses added to "Your courses" (saved on the phone; null = loading).
+  const [myCourseIds, setMyCourseIds] = useState(null);
 
   // Used by refreshProgress (see below).
   const loggedIn = useRef(false);
@@ -82,7 +120,9 @@ export default function App() {
     setRankingPeriod("weekly");
     setSelectedCourse(null);
     setSelectedLesson(null);
-    setScreen("login");
+    setSelectedStage(null);
+    setMyCourseIds(null);
+    setStack([LOGIN]);
   }, []);
 
   // On launch: if a saved session exists, skip the login screen.
@@ -93,7 +133,7 @@ export default function App() {
       .then((restoredUser) => {
         if (!cancelled && restoredUser) {
           setUser(restoredUser);
-          setScreen("home");
+          setStack([HOME]);
         }
       })
       .catch((error) => {
@@ -152,7 +192,7 @@ export default function App() {
         }
         Alert.alert("Couldn't load your data", error.message);
         setUser(null);
-        setScreen("login");
+        setStack([LOGIN]);
       })
       .finally(() => {
         if (!cancelled) {
@@ -220,10 +260,9 @@ export default function App() {
     }
   }, [rankingScope, rankingPeriod]);
   // Presence: while a student is logged in and the app is open, tell the
-  // server every 45 seconds, and say which lesson screen is open (if any).
+  // server every 45 seconds, and say which chapter (lesson) is open, if any.
   // It stops when the app goes to the background or the student logs out.
-  const lessonScreens = ["lesson", "quiz", "practice"];
-  const heartbeatLessonId = lessonScreens.includes(screen)
+  const heartbeatLessonId = screen === "path" || screen === "stage" || screen === "activity"
     ? (selectedLesson?.id ?? null)
     : null;
 
@@ -262,13 +301,48 @@ export default function App() {
     };
   }, [user, heartbeatLessonId]);
 
-  // Switch screens, and fetch fresh data whenever the screen actually changes.
-  const goTo = (target) => {
-    if (target !== screen) {
+  // Screens that show server data. Arriving on one fetches fresh data, as
+  // switching screens always has.
+  const DATA_SCREENS = ["home", "courses", "explore", "course", "path", "ranking", "profile"];
+
+  const showScreen = (nextStack) => {
+    const target = currentScreen(nextStack);
+    if (target !== screen && DATA_SCREENS.includes(target)) {
       refreshProgress();
     }
-    setScreen(target);
+    setStack(nextStack);
   };
+
+  // Bottom-nav tabs start a fresh history.
+  const goTo = (tab) => showScreen(switchTab(stack, tab));
+
+  const openScreen = (target) => showScreen(push(stack, target));
+
+  // One step back. The on-screen back buttons and Android's back button use
+  // the same history, so they always agree.
+  const goBack = () => {
+    const result = back(stack);
+    if (result.handled) {
+      showScreen(result.stack);
+    }
+    return result.handled;
+  };
+
+  // Android hardware back. Not handled on Home or Login, so the system
+  // closes the app as usual there.
+  const goBackRef = useRef(goBack);
+  goBackRef.current = goBack;
+
+  useEffect(() => {
+    if (!user) {
+      return undefined;
+    }
+    const subscription = BackHandler.addEventListener(
+      "hardwareBackPress",
+      () => goBackRef.current(),
+    );
+    return () => subscription.remove();
+  }, [user]);
 
   const navProps = {
     onHome: () => goTo("home"),
@@ -281,7 +355,7 @@ export default function App() {
     try {
       const loggedInUser = await loginUser(email.trim(), password);
       setUser(loggedInUser);
-      setScreen("home");
+      setStack([HOME]);
     } catch (error) {
       Alert.alert("Login failed", error.message);
     }
@@ -343,19 +417,131 @@ export default function App() {
     [rankingScope],
   );
 
-  const openCourse = (course) => {
+  // "Your courses": loaded once the course list is known. The first time,
+  // courses with progress are added automatically (see services/myCourses).
+  useEffect(() => {
+    if (!user || !student || myCourseIds !== null) return;
+    let cancelled = false;
+    loadMyCourseIds(user.id, courses).then((ids) => {
+      if (!cancelled) setMyCourseIds(ids);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [user, student, courses, myCourseIds]);
+
+  const setMine = (ids) => {
+    setMyCourseIds(ids);
+    saveMyCourseIds(user.id, ids);
+  };
+  const isMine = (courseId) => (myCourseIds ?? []).includes(courseId);
+  const addCourse = (courseId) => {
+    if (!isMine(courseId)) setMine([...(myCourseIds ?? []), courseId]);
+  };
+  const toggleCourse = (courseId) =>
+    isMine(courseId)
+      ? setMine((myCourseIds ?? []).filter((id) => id !== courseId))
+      : addCourse(courseId);
+
+  // A course not begun yet opens on its introduction (once); otherwise on its journey path.
+  const openCourse = async (course) => {
+    let intro = false;
+    try {
+      intro = isFreshCourse(course) && !(await hasSeen(user.id, "intro", course.id));
+    } catch (error) {
+      // keep the path
+    }
     setSelectedCourse(course);
-    setScreen("course");
+    openScreen(intro ? "intro" : "course");
   };
 
+  // "Start Journey": the course joins "Your courses" and the path replaces the introduction.
+  const startJourney = () => {
+    markSeen(user.id, "intro", selectedCourse.id);
+    addCourse(selectedCourse.id);
+    showScreen([...stack.slice(0, -1), "course"]);
+  };
+
+  // A chapter opens as its path of stages.
   const openLesson = (lesson) => {
     setSelectedLesson(lesson);
-    setScreen("lesson");
+    openScreen("path");
   };
+
+  // Opens a video or a reading of the chapter.
+  const openActivity = (activity, trail = { context: null, next: null }) => {
+    setSelectedActivity(activity);
+    setActivityTrail(trail);
+    openScreen("activity");
+  };
+
+  // From a finished video or reading to what comes next, without going back to the path.
+  const goToNext = (next) => {
+    if (next.type === "questions") {
+      setSelectedStage(null);
+      showScreen([...stack.slice(0, -1), "stage"]);
+      return;
+    }
+    setActivityTrail(activityTrail.follow ? activityTrail.follow(next.activity) : { context: null, next: null });
+    setSelectedActivity(next.activity);
+  };
+
+  // Opens a stage (index, or null = the next one not done). Starting a
+  // stage adds the course to "Your courses".
+  const openStage = (stageIndex) => {
+    if (selectedCourse) addCourse(selectedCourse.id);
+    setSelectedStage(stageIndex);
+    if (screen !== "stage") openScreen("stage");
+  };
+
+  // Home's Continue: straight into the next stage, with the course and the
+  // chapter path underneath so going back lands on them.
+  // A chapter with a video or reading still to do, or with no questions at all, opens on its
+  // path instead, so those steps are not skipped. If its activities can't be loaded, behave as
+  // before and go straight to the stage.
+  const continueChapter = async (course, lesson) => {
+    // A course not begun yet starts with its introduction.
+    try {
+      if (isFreshCourse(course) && !(await hasSeen(user.id, "intro", course.id))) {
+        setSelectedCourse(course);
+        showScreen([...stack, "intro"]);
+        return;
+      }
+    } catch (error) {
+      // go on to the chapter
+    }
+    let straightToStage = true;
+    try {
+      const steps = buildSteps((await fetchLessonActivities(lesson.id)).activities);
+      const hasQuestions = steps.some((step) => step.type === "questions");
+      const ownStepToDo = steps.some((step) => step.type !== "questions" && !step.activity.completed);
+      straightToStage = hasQuestions && !ownStepToDo;
+    } catch (error) {
+      // keep the shortcut
+    }
+    setSelectedCourse(course);
+    setSelectedLesson(lesson);
+    setSelectedStage(null);
+    showScreen([...stack, "course", "path", ...(straightToStage ? ["stage"] : [])]);
+  };
+
+  // The selected chapter as it is in the latest course data (so "done"
+  // updates after a submit).
+  const currentLesson =
+    flattenChapters(selectedCourse).find((lesson) => lesson.id === selectedLesson?.id) ??
+    selectedLesson;
+
+  // Shown on a back link: the screen you'd return to.
+  const BACK_LABELS = { home: "Home", courses: "Courses", explore: "Explore" };
+  const previousScreen = stack[stack.length - 2];
+  const backLabel =
+    previousScreen === "course" ? selectedCourse?.title : BACK_LABELS[previousScreen];
+
+  const myCourses = courses.filter((course) => isMine(course.id));
 
   const rankingEntries = Array.isArray(ranking?.entries) ? ranking.entries : [];
 
-  if (restoring) {
+  if (restoring || (!fontsLoaded && !fontError)) {
     return (
       <View style={styles.loadingScreen}>
         <ActivityIndicator size="large" color={colors.orange} />
@@ -378,12 +564,15 @@ export default function App() {
   if (screen === "home") {
     return (
       <HomeScreen
+        userId={user.id}
         user={student}
-        courses={courses}
+        courses={myCourses}
+        availableCount={courses.length}
         ranking={rankingEntries}
         {...navProps}
+        onExplore={() => openScreen("explore")}
         onSelectCourse={openCourse}
-        onLogout={handleLogout}
+        onContinueChapter={continueChapter}
       />
     );
   }
@@ -393,7 +582,7 @@ export default function App() {
       <ProfileScreen
         user={student}
         ranking={rankingEntries}
-        onBack={() => goTo("home")}
+        onBack={goBack}
         onLogout={handleLogout}
         {...navProps}
       />
@@ -404,9 +593,24 @@ export default function App() {
     return (
       <CoursesScreen
         courses={courses}
+        myCourseIds={myCourseIds ?? []}
+        onExplore={() => openScreen("explore")}
         onSelectCourse={openCourse}
-        onBack={() => goTo("home")}
         {...navProps}
+      />
+    );
+  }
+
+  if (screen === "explore") {
+    return (
+      <ExploreScreen
+        courses={courses}
+        myCourseIds={myCourseIds ?? []}
+        onAddCourse={addCourse}
+        onSelectCourse={openCourse}
+        onBack={goBack}
+        backLabel={backLabel}
+        onCourses={navProps.onCourses}
       />
     );
   }
@@ -414,44 +618,109 @@ export default function App() {
   if (screen === "course") {
     return (
       <CourseScreen
+        userId={user.id}
         course={selectedCourse}
+        isMine={isMine(selectedCourse.id)}
+        onToggleMine={() => toggleCourse(selectedCourse.id)}
+        backLabel={backLabel}
         onSelectLesson={openLesson}
-        onBack={() => goTo("courses")}
+        onBack={goBack}
         {...navProps}
       />
     );
   }
 
-  if (screen === "lesson") {
+  if (screen === "intro" && selectedCourse) {
     return (
-      <LessonScreen
-        lesson={selectedLesson}
-        onBack={() => setScreen("course")}
-        onQuiz={() => setScreen("quiz")}
-        onPractice={() => setScreen("practice")}
-        {...navProps}
+      <JourneyMoment
+        key={selectedCourse.id}
+        course={selectedCourse}
+        overline="A NEW JOURNEY"
+        title={selectedCourse.title}
+        body={
+          selectedCourse.description ||
+          "Chapter by chapter, I'll show you the way. Ready when you are."
+        }
+        chapters={flattenChapters(selectedCourse).length}
+        done={0}
+        caption={`${flattenChapters(selectedCourse).length} ${chapterWord(flattenChapters(selectedCourse).length)} to the den`}
+        buttonLabel="Start Journey"
+        onPress={startJourney}
+        onBack={goBack}
       />
     );
   }
 
-  if (screen === "practice") {
+  if (screen === "path") {
     return (
-      <PracticeScreen
-        lesson={selectedLesson}
-        onBack={() => setScreen("lesson")}
+      <ChapterPathScreen
+        key={currentLesson.id}
+        userId={user.id}
+        course={selectedCourse}
+        chapterNumber={
+          flattenChapters(selectedCourse).findIndex((lesson) => lesson.id === currentLesson.id) + 1 || null
+        }
+        chapterCount={flattenChapters(selectedCourse).length}
+        lesson={currentLesson}
+        onBack={goBack}
+        onOpenStage={openStage}
+        onOpenActivity={openActivity}
         onComplete={refreshProgress}
-        {...navProps}
       />
     );
   }
 
-  if (screen === "quiz") {
+  if (screen === "activity" && selectedActivity) {
+    // Nothing left in this chapter: on to the next chapter, or, at the end of the course, the journey.
+    const upNextChapter = nextChapter(selectedCourse, currentLesson?.id);
+    const closing = upNextChapter
+      ? {
+          label: "Next chapter",
+          onPress: () => {
+            setSelectedLesson(upNextChapter);
+            showScreen(stack.slice(0, -1)); // to the next chapter's path
+          },
+        }
+      : {
+          label: "See my journey",
+          onPress: () => {
+            const at = stack.lastIndexOf("course");
+            showScreen(at >= 0 ? stack.slice(0, at + 1) : [...stack.slice(0, -2), "course"]);
+          },
+        };
     return (
-      <QuizScreen
-        lesson={selectedLesson}
-        onBack={() => setScreen("lesson")}
+      <ActivityScreen
+        key={selectedActivity.id}
+        activity={selectedActivity}
+        context={activityTrail.context}
+        next={activityTrail.next}
+        onNext={goToNext}
+        closing={closing}
+        onBack={goBack}
+        // The server completed the lesson too: refresh so the course shows it.
+        onCompleted={refreshProgress}
+      />
+    );
+  }
+
+  if (screen === "stage") {
+    const upNext = nextChapter(selectedCourse, currentLesson?.id);
+    return (
+      <StageSession
+        // A new chapter or stage starts fresh.
+        key={`${currentLesson.id}-${selectedStage}`}
+        userId={user.id}
+        lesson={currentLesson}
+        stageIndex={selectedStage}
+        hasNextChapter={!!upNext}
+        onExit={goBack}
+        onOpenStage={openStage}
+        onNextChapter={() => {
+          if (!upNext) return;
+          setSelectedLesson(upNext);
+          showScreen(stack.slice(0, -1)); // to the next chapter's path
+        }}
         onComplete={refreshProgress}
-        {...navProps}
       />
     );
   }
@@ -467,7 +736,7 @@ export default function App() {
         onRankingScopeChange={onRankingScopeChange}
         rankingPeriod={rankingPeriod}
         onRankingPeriodChange={onRankingPeriodChange}
-        onBack={() => goTo("home")}
+        onBack={goBack}
         onRefresh={refreshProgress}
         {...navProps}
       />

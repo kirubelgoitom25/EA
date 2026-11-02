@@ -1,7 +1,6 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   View,
-  Text,
   TextInput,
   StyleSheet,
   KeyboardAvoidingView,
@@ -9,41 +8,37 @@ import {
   Platform,
   ScrollView,
 } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { radius, useTheme } from "../theme";
-import DuoButton from "./DuoButton";
+import { layout, space, tokens, type } from "../theme";
+import AppText from "./ui/AppText";
+import Button from "./ui/Button";
+import Fox from "./ui/Fox";
 
+// Log in: the fox says hello, two fields, one button. Errors are shown by
+// App.js (it owns the login call).
 export default function LoginScreen({ onLogin }) {
-  const { colors } = useTheme();
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const insets = useSafeAreaInsets();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [keyboardVisible, setKeyboardVisible] = useState(false);
-
+  const [focused, setFocused] = useState(null);
   const passwordRef = useRef(null);
   const scrollRef = useRef(null);
 
   const canSubmit = email.length > 0 && password.length > 0 && !submitting;
 
-  // Track the keyboard so the layout can shrink while it is open.
+  // While the keyboard is open the fox steps aside so both fields and the
+  // button stay visible.
   useEffect(() => {
-    const showEvent =
-      Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
-    const hideEvent =
-      Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
-
+    const showEvent = Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
+    const hideEvent = Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
     const showSub = Keyboard.addListener(showEvent, () => {
       setKeyboardVisible(true);
-      // Give the layout a moment to resize, then scroll to the bottom
-      // so the button and both fields stay visible.
       setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 100);
     });
-    const hideSub = Keyboard.addListener(hideEvent, () =>
-      setKeyboardVisible(false),
-    );
-
+    const hideSub = Keyboard.addListener(hideEvent, () => setKeyboardVisible(false));
     return () => {
       showSub.remove();
       hideSub.remove();
@@ -51,10 +46,7 @@ export default function LoginScreen({ onLogin }) {
   }, []);
 
   const handleLogin = async () => {
-    if (!canSubmit) {
-      return;
-    }
-
+    if (!canSubmit) return;
     Keyboard.dismiss();
     setSubmitting(true);
     try {
@@ -65,294 +57,147 @@ export default function LoginScreen({ onLogin }) {
   };
 
   return (
-    <KeyboardAvoidingView
-      style={styles.container}
-      behavior={Platform.OS === "ios" ? "padding" : "height"}
-    >
+    <KeyboardAvoidingView style={styles.root} behavior={Platform.OS === "ios" ? "padding" : "height"}>
       <ScrollView
         ref={scrollRef}
         contentContainerStyle={[
           styles.content,
-          keyboardVisible && styles.contentKeyboard,
+          { paddingTop: insets.top + (keyboardVisible ? space.xl : space.xxxl), paddingBottom: insets.bottom + space.xl },
         ]}
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
         showsVerticalScrollIndicator={false}
       >
-        <View style={styles.heroWrap}>
-          <View
-            style={[
-              styles.brandBadge,
-              keyboardVisible && styles.brandBadgeSmall,
-            ]}
-          >
-            <Text
-              style={[
-                styles.brandBadgeText,
-                keyboardVisible && styles.brandBadgeTextSmall,
-              ]}
-            >
-              EA
-            </Text>
-          </View>
+        {!keyboardVisible ? <Fox mood="greeting" size={168} /> : null}
 
-          {/* Mascot is hidden while typing to free up space */}
-          {!keyboardVisible && (
-            <View style={styles.mascotCard}>
-              <View style={styles.mascotBody}>
-                <Ionicons name="school" size={42} color="#fff" />
-              </View>
-              <View style={[styles.floatDot, styles.dotOrange]} />
-              <View style={[styles.floatDot, styles.dotYellow]} />
-              <View style={[styles.floatDot, styles.dotBlue]} />
-            </View>
-          )}
-        </View>
-
-        <Text style={[styles.title, keyboardVisible && styles.titleSmall]}>
-          KEEP YOUR STREAK GOING
-        </Text>
-        {!keyboardVisible && (
-          <Text style={styles.subtitle}>
-            Welcome back! Ready for another small win?
-          </Text>
-        )}
+        <AppText variant="display" style={[styles.title, keyboardVisible && styles.titleTight]}>
+          Welcome back
+        </AppText>
+        {!keyboardVisible ? (
+          <AppText tone="secondary" style={styles.subtitle}>
+            Your trail is waiting.
+          </AppText>
+        ) : null}
 
         <View style={styles.form}>
-          <Text style={styles.label}>Email</Text>
-          <View style={styles.inputWrap}>
-            <Ionicons
-              name="mail-outline"
-              size={18}
-              color={colors.textMuted}
-              style={styles.inputIcon}
-            />
-            <TextInput
-              style={styles.input}
-              placeholder="you@example.com"
-              placeholderTextColor={colors.textMuted}
-              value={email}
-              onChangeText={setEmail}
-              keyboardType="email-address"
-              autoCapitalize="none"
-              autoCorrect={false}
-              returnKeyType="next"
-              blurOnSubmit={false}
-              onSubmitEditing={() => passwordRef.current?.focus()}
-            />
-          </View>
+          <AppText variant="label" tone="secondary" style={styles.label} nativeID="emailLabel">
+            Email
+          </AppText>
+          <TextInput
+            style={[styles.input, focused === "email" && styles.inputFocused]}
+            placeholder="you@school.com"
+            placeholderTextColor={tokens.textTertiary}
+            value={email}
+            onChangeText={setEmail}
+            onFocus={() => setFocused("email")}
+            onBlur={() => setFocused(null)}
+            keyboardType="email-address"
+            autoCapitalize="none"
+            autoCorrect={false}
+            autoComplete="email"
+            textContentType="emailAddress"
+            returnKeyType="next"
+            blurOnSubmit={false}
+            onSubmitEditing={() => passwordRef.current?.focus()}
+            accessibilityLabel="Email"
+            accessibilityLabelledBy="emailLabel"
+          />
 
-          <Text style={styles.label}>Password</Text>
-          <View style={styles.inputWrap}>
-            <Ionicons
-              name="lock-closed-outline"
-              size={18}
-              color={colors.textMuted}
-              style={styles.inputIcon}
-            />
-            <TextInput
-              ref={passwordRef}
-              style={styles.input}
-              placeholder="Enter your password"
-              placeholderTextColor={colors.textMuted}
-              value={password}
-              onChangeText={setPassword}
-              secureTextEntry
-              returnKeyType="done"
-              onSubmitEditing={handleLogin}
-            />
-          </View>
+          <AppText variant="label" tone="secondary" style={styles.label} nativeID="passwordLabel">
+            Password
+          </AppText>
+          <TextInput
+            ref={passwordRef}
+            style={[styles.input, focused === "password" && styles.inputFocused]}
+            placeholder="Your password"
+            placeholderTextColor={tokens.textTertiary}
+            value={password}
+            onChangeText={setPassword}
+            onFocus={() => setFocused("password")}
+            onBlur={() => setFocused(null)}
+            secureTextEntry
+            autoComplete="password"
+            textContentType="password"
+            returnKeyType="done"
+            onSubmitEditing={handleLogin}
+            accessibilityLabel="Password"
+            accessibilityLabelledBy="passwordLabel"
+          />
 
-          <DuoButton
-            label="Log In"
-            variant="primary"
-            disabled={!canSubmit}
+          <Button
+            label="Log in"
             onPress={handleLogin}
-            style={styles.loginButton}
-            icon={<Ionicons name="arrow-forward" size={18} color="#fff" />}
+            disabled={!email || !password}
+            loading={submitting}
+            style={styles.button}
           />
         </View>
 
-        {!keyboardVisible && (
-          <Text style={styles.footerText}>
-            New here? The Administrator to create an account for you.
-          </Text>
-        )}
+        <AppText variant="caption" tone="secondary" style={styles.footer}>
+          New here? Ask your school administrator to create an account for you.
+        </AppText>
       </ScrollView>
     </KeyboardAvoidingView>
   );
 }
 
-const createStyles = (colors) =>
-  StyleSheet.create({
-    container: {
-      flex: 1,
-      backgroundColor: colors.screenBg,
-    },
+const styles = StyleSheet.create({
+  root: {
+    flex: 1,
+    backgroundColor: tokens.bg,
+  },
 
-    content: {
-      flexGrow: 1,
-      justifyContent: "center",
-      paddingHorizontal: 26,
-      paddingTop: 50,
-      paddingBottom: 40,
-    },
+  content: {
+    flexGrow: 1,
+    justifyContent: "center",
+    paddingHorizontal: layout.gutter,
+  },
 
-    // When the keyboard is open, start from the top and leave room below
-    contentKeyboard: {
-      justifyContent: "flex-start",
-      paddingTop: 30,
-      paddingBottom: 24,
-    },
+  title: {
+    marginTop: space.xl,
+    textAlign: "center",
+  },
 
-    heroWrap: {
-      alignItems: "center",
-      marginBottom: 18,
-    },
+  titleTight: {
+    marginTop: 0,
+  },
 
-    brandBadge: {
-      width: 74,
-      height: 74,
-      borderRadius: 22,
-      backgroundColor: colors.orange,
-      justifyContent: "center",
-      alignItems: "center",
-      marginBottom: 16,
-      shadowColor: "#F5C8AF",
-      shadowOpacity: 0.45,
-      shadowRadius: 18,
-      shadowOffset: { width: 0, height: 10 },
-      elevation: 5,
-    },
+  subtitle: {
+    marginTop: space.xs,
+    textAlign: "center",
+  },
 
-    brandBadgeSmall: {
-      width: 52,
-      height: 52,
-      borderRadius: 16,
-      marginBottom: 0,
-    },
+  form: {
+    marginTop: space.xxl,
+  },
 
-    brandBadgeText: {
-      color: "#fff",
-      fontSize: 28,
-      fontWeight: "900",
-      letterSpacing: -1,
-    },
+  label: {
+    marginBottom: space.sm,
+    marginTop: space.lg,
+  },
 
-    brandBadgeTextSmall: {
-      fontSize: 20,
-    },
+  input: {
+    ...type.body,
+    color: tokens.text,
+    height: 56,
+    paddingHorizontal: space.lg,
+    borderRadius: layout.radius,
+    borderWidth: 1.5,
+    borderColor: tokens.divider,
+    backgroundColor: tokens.surface,
+  },
 
-    mascotCard: {
-      width: 150,
-      height: 150,
-      alignItems: "center",
-      justifyContent: "center",
-      position: "relative",
-    },
+  inputFocused: {
+    borderColor: tokens.accent,
+    borderWidth: 2,
+  },
 
-    mascotBody: {
-      width: 104,
-      height: 104,
-      borderRadius: 52,
-      backgroundColor: colors.orange,
-      justifyContent: "center",
-      alignItems: "center",
-      borderBottomWidth: 6,
-      borderBottomColor: colors.orangeDeep,
-    },
+  button: {
+    marginTop: space.xxl,
+  },
 
-    floatDot: {
-      position: "absolute",
-      width: 18,
-      height: 18,
-      borderRadius: 9,
-    },
-
-    dotOrange: {
-      backgroundColor: colors.orange,
-      top: 10,
-      right: 18,
-    },
-
-    dotYellow: {
-      backgroundColor: colors.yellow,
-      bottom: 18,
-      left: 20,
-    },
-
-    dotBlue: {
-      backgroundColor: colors.blue,
-      top: 26,
-      left: 6,
-    },
-
-    title: {
-      fontSize: 28,
-      fontWeight: "900",
-      textAlign: "center",
-      color: colors.text,
-      letterSpacing: -0.8,
-      marginBottom: 8,
-    },
-
-    titleSmall: {
-      fontSize: 22,
-      marginBottom: 12,
-    },
-
-    subtitle: {
-      fontSize: 15,
-      color: colors.textSecondary,
-      textAlign: "center",
-      marginBottom: 28,
-      fontWeight: "600",
-    },
-
-    form: {
-      width: "100%",
-    },
-
-    label: {
-      fontSize: 12,
-      fontWeight: "800",
-      color: colors.textSecondary,
-      letterSpacing: 0.6,
-      marginBottom: 8,
-      marginTop: 12,
-    },
-
-    inputWrap: {
-      flexDirection: "row",
-      alignItems: "center",
-      height: 56,
-      backgroundColor: colors.card,
-      borderWidth: 1.5,
-      borderColor: colors.border,
-      borderRadius: radius.md,
-      paddingHorizontal: 14,
-      marginBottom: 6,
-    },
-
-    inputIcon: {
-      marginRight: 10,
-    },
-
-    input: {
-      flex: 1,
-      fontSize: 16,
-      color: colors.text,
-      height: "100%",
-    },
-
-    loginButton: {
-      marginTop: 26,
-    },
-
-    footerText: {
-      textAlign: "center",
-      color: colors.textMuted,
-      fontSize: 13,
-      marginTop: 20,
-    },
-  });
+  footer: {
+    marginTop: space.xl,
+    textAlign: "center",
+  },
+});

@@ -1,104 +1,101 @@
-import React, { useMemo } from "react";
-import { View, Text, StyleSheet, TouchableOpacity, Platform } from "react-native";
+import React from "react";
+import { View, StyleSheet, Pressable } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+
 import { Ionicons } from "@expo/vector-icons";
 import { haptic } from "../services/feedback";
-import { radius, useTheme } from "../theme";
+import { layout, tokens } from "../theme";
+import { NAV_BAR_HEIGHT, NAV_BAR_MARGIN } from "./ui/Screen";
 
+// One icon family: outline when idle, filled when you're on it.
+const ICONS = {
+  home: ["home-outline", "home"],
+  courses: ["book-outline", "book"],
+  ranking: ["trophy-outline", "trophy"],
+  profile: ["person-outline", "person"],
+};
+
+// The labels are for screen readers only — the bar itself is icons.
 const TABS = [
-  { key: "home", label: "Home", icon: "home" },
-  { key: "courses", label: "Courses", icon: "book" },
-  { key: "ranking", label: "Ranking", icon: "trophy" },
-  { key: "profile", label: "Profile", icon: "person" },
+  { key: "home", label: "Home" },
+  { key: "courses", label: "Courses" },
+  { key: "ranking", label: "Leaderboard" },
+  { key: "profile", label: "Profile" },
 ];
 
+// The bottom tab bar on every main screen: a floating white pill, icons only. The
+// active tab is a filled ember icon in a soft capsule.
 export default function BottomNavBar({ active, onNavigate }) {
-  const { colors } = useTheme();
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const insets = useSafeAreaInsets();
 
   return (
-    <View style={styles.wrapper}>
+    <View style={[styles.wrapper, { bottom: insets.bottom + NAV_BAR_MARGIN }]} accessibilityRole="tablist">
       {TABS.map((tab) => {
         const isActive = active === tab.key;
+        const [outline, filled] = ICONS[tab.key];
 
         return (
-          <TouchableOpacity
+          <Pressable
             key={tab.key}
-            style={styles.tab}
+            style={({ pressed }) => [styles.tab, pressed && styles.pressed]}
             onPress={() => {
               haptic.light();
               onNavigate(tab.key);
             }}
-            activeOpacity={0.8}
+            accessibilityRole="tab"
+            accessibilityLabel={tab.label}
+            accessibilityState={{ selected: isActive }}
           >
-            <View style={[styles.iconWrap, isActive && styles.activeIconWrap]}>
+            <View style={[styles.capsule, isActive && styles.capsuleActive]}>
               <Ionicons
-                name={isActive ? tab.icon : `${tab.icon}-outline`}
-                size={22}
-                color={isActive ? colors.orange : colors.textSecondary}
+                name={isActive ? filled : outline}
+                size={24}
+                color={isActive ? tokens.accent : tokens.textSecondary}
               />
             </View>
-
-            <Text style={[styles.label, isActive && styles.activeLabel]}>
-              {tab.label}
-            </Text>
-          </TouchableOpacity>
+          </Pressable>
         );
       })}
     </View>
   );
 }
 
-const createStyles = (colors) => StyleSheet.create({
+const styles = StyleSheet.create({
   wrapper: {
     position: "absolute",
-    left: 16,
-    right: 16,
-    bottom: 14,
+    left: layout.gutter,
+    right: layout.gutter,
     flexDirection: "row",
-    backgroundColor: colors.orangeLight,
-    borderRadius: radius.xl,
-    paddingTop: 10,
-    paddingBottom: Platform.OS === "ios" ? 22 : 10,
-    paddingHorizontal: 10,
-    borderWidth: 1.5,
-    borderColor: colors.orangeSoft,
-    shadowColor: colors.orange,
-    shadowOpacity: 0.18,
+    backgroundColor: tokens.surface,
+    borderRadius: NAV_BAR_HEIGHT / 2,
+    paddingHorizontal: 8,
+    shadowColor: tokens.plum,
+    shadowOpacity: 0.14,
     shadowRadius: 14,
     shadowOffset: { width: 0, height: 6 },
-    elevation: 6,
+    elevation: 8,
   },
 
   tab: {
     flex: 1,
+    height: NAV_BAR_HEIGHT,
     alignItems: "center",
     justifyContent: "center",
-    paddingVertical: 6,
   },
 
-  iconWrap: {
-    width: 48,
-    height: 32,
-    borderRadius: radius.full,
-    justifyContent: "center",
+  pressed: {
+    opacity: 0.6,
+  },
+
+  capsule: {
+    width: 60,
+    height: 40,
+    borderRadius: 20,
     alignItems: "center",
-    marginBottom: 2,
+    justifyContent: "center",
   },
 
-  activeIconWrap: {
-    backgroundColor: "#fff",
-    borderBottomWidth: 3,
-    borderBottomColor: colors.orangeDeep,
-  },
-
-  label: {
-    fontSize: 11,
-    fontWeight: "700",
-    color: colors.textSecondary,
-  },
-
-  activeLabel: {
-    color: colors.orangeDeep,
-    fontWeight: "800",
+  capsuleActive: {
+    backgroundColor: tokens.accentTint,
   },
 });

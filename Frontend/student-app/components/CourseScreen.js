@@ -1,21 +1,37 @@
-import React, { useMemo } from "react";
-import {
-  View,
-  Text,
-  StyleSheet,
-  TouchableOpacity,
-  ScrollView,
-} from "react-native";
+import React, { useEffect, useRef, useState } from "react";
+import { Pressable, ScrollView, StyleSheet, View, useWindowDimensions } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { haptic } from "../services/feedback";
-import { radius, useTheme } from "../theme";
+import { loadProgressSummary } from "../services/chapterProgress";
+import { hasSeen, markSeen } from "../services/journey";
+import { chapterWord, isCourseComplete } from "../services/journeyModel";
+import { layout, space, stone, tokens } from "../theme";
 import BottomNavBar from "./BottomNavBar";
+import JourneyMoment from "./JourneyMoment";
+import { firstOpenChapter, flattenChapters } from "./session/sessionModel";
+import AppText from "./ui/AppText";
+import Button from "./ui/Button";
+import DotGrid from "./ui/DotGrid";
+import Emblem from "./ui/Emblem";
+import EmptyState from "./ui/EmptyState";
+import { useFoxReact } from "./ui/FoxContext";
+import ProgressBar from "./ui/ProgressBar";
+import Route, { routeMetrics } from "./ui/Route";
+import { TAB_BAR_HEIGHT } from "./ui/Screen";
+import StatusBarScrim, { scrimOnScroll } from "./ui/StatusBarScrim";
 
-const NODE_SIZE = 58;
-
+// A course as a journey. No hero picture: the course's own emblem (its colour, pattern and subject)
+// with a ring that fills as you go, its title, and straight below it the path of its chapters. The
+// fox stands at the chapter you're on, which opens into a card with one button. Every chapter is open
+// (nothing is locked); the path just shows where to go next. The page scrolls to your chapter.
+// The first time the last chapter is done, the finale plays once.
 export default function CourseScreen({
+  userId,
   course,
+  isMine,
+  onToggleMine,
+  backLabel,
   onSelectLesson,
   onBack,
   onHome,
@@ -23,118 +39,200 @@ export default function CourseScreen({
   onRanking,
   onProfile,
 }) {
-  const { colors } = useTheme();
-  const styles = useMemo(() => createStyles(colors), [colors]);
-  let firstIncompleteFound = false;
+  const insets = useSafeAreaInsets();
+  const foxReact = useFoxReact();
+  const scroll = useRef(null);
+  const { height: screenHeight } = useWindowDimensions();
+  const [scrolled, setScrolled] = useState(false);
+  const [away, setAway] = useState(null); // "above" / "below": your chapter is out of view
+  const chapters = flattenChapters(course);
+  const total = chapters.length;
+  const next = firstOpenChapter(course);
+  const nextIndex = next ? chapters.findIndex((chapter) => chapter.id === next.id) : -1;
+  const doneCount = chapters.filter((chapter) => chapter.completed).length;
+  const finished = isCourseComplete(course) || (total > 0 && doneCount === total);
+
+  // Stages done on this phone for chapters not finished yet.
+  const [stageProgress, setStageProgress] = useState({});
+  useEffect(() => {
+    let cancelled = false;
+    loadProgressSummary(userId, chapters.map((chapter) => chapter.id)).then((summary) => {
+      if (!cancelled) setStageProgress(summary);
+    });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [course, userId]);
+
+  // The finale: once, the first time the student sees this course finished.
+  const [finale, setFinale] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    if (!finished) {
+      setFinale(false);
+      return undefined;
+    }
+    hasSeen(userId, "finale", course.id).then((seen) => {
+      if (!cancelled && !seen) {
+        setFinale(true);
+        foxReact("courseDone");
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [finished, userId, course.id]);
+  const closeFinale = () => {
+    setFinale(false);
+    markSeen(userId, "finale", course.id);
+  };
+
+  // A chapter that starts a part of the course (a Studio chapter) gets a small dome on the path before it
+  // that names the part when tapped.
+  const firstOfModule = new Set((course.modules ?? []).map((module) => module.lessons?.[0]?.id));
+  const moduleOf = {};
+  (course.modules ?? []).forEach((module) => (module.lessons ?? []).forEach((lesson) => (moduleOf[lesson.id] = module.title)));
+  const showParts = (course.modules ?? []).length > 1;
+
+  const items = chapters.map((chapter, i) => {
+    const number = i + 1;
+    const partial = !chapter.completed && stageProgress[chapter.id];
+    const status = chapter.completed ? "done" : next?.id === chapter.id ? "next" : "todo";
+    const stages = partial && partial.stageCount ? `${partial.stagesDone} of ${partial.stageCount} stages` : null;
+    const caption = status === "done" ? "Done" : stages ?? `Chapter ${number}`;
+    return {
+      status,
+      number,
+      eyebrow: showParts && firstOfModule.has(chapter.id) ? moduleOf[chapter.id] : undefined,
+      tag: `Chapter ${number}`,
+      kicker: `Chapter ${number}${partial && partial.stageCount ? ` · ${partial.stagesDone}/${partial.stageCount}` : ""}`,
+      action: doneCount === 0 && !stages ? "Start" : "Continue",
+      title: chapter.title,
+      // the node shows the chapter's number, so the step only adds words when there are some
+      caption: status === "done" ? caption : stages ?? undefined,
+      accessibilityLabel: `Chapter ${number}, ${chapter.title}, ${status === "next" ? "up next" : caption}`,
+    };
+  });
+
+  // A long path scrolls to the chapter you're on, so it is the first thing you see. A short one
+  // already fits, and its header stays in view.
+  const routeTop = useRef(0);
+  const scrolledToNow = useRef(false);
+  const nodeY = () => routeTop.current + routeMetrics(items, true).centers[nextIndex];
+  const scrollToNow = () => {
+    if (scrolledToNow.current || nextIndex < 0 || !scroll.current) return;
+    scrolledToNow.current = true;
+    const stopY = routeTop.current + routeMetrics(items, true).offsets[nextIndex];
+    if (stopY + 170 > screenHeight - 220) {
+      setTimeout(() => scroll.current?.scrollTo({ y: Math.max(0, stopY - screenHeight * 0.28), animated: true }), 500);
+    }
+  };
+
+  // Is your chapter out of view? Then a pill says which way it is, and takes you there.
+  const checkAway = (offset, viewHeight) => {
+    if (nextIndex < 0 || finished) return setAway(null);
+    const y = nodeY();
+    if (y < offset + insets.top + 60) setAway("above");
+    else if (y > offset + viewHeight - TAB_BAR_HEIGHT - insets.bottom - 60) setAway("below");
+    else setAway(null);
+  };
+  const scrim = scrimOnScroll(24, scrolled, setScrolled);
+  const jumpToNow = () => scroll.current?.scrollTo({ y: Math.max(0, nodeY() - screenHeight * 0.35), animated: true });
 
   return (
     <View style={styles.root}>
-      <ScrollView style={styles.container} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-        <View style={styles.header}>
-          <TouchableOpacity onPress={() => { haptic.light(); onBack(); }} activeOpacity={0.7} style={styles.backButton}>
-            <Ionicons name="chevron-back" size={22} color={colors.text} />
-            <Text style={styles.backText}>Courses</Text>
-          </TouchableOpacity>
+      <ScrollView
+        ref={scroll}
+        contentContainerStyle={{ flexGrow: 1, paddingBottom: TAB_BAR_HEIGHT + insets.bottom + space.xxl }}
+        showsVerticalScrollIndicator={false}
+        onScroll={(event) => {
+          scrim(event);
+          checkAway(event.nativeEvent.contentOffset.y, event.nativeEvent.layoutMeasurement.height);
+        }}
+        scrollEventThrottle={32}
+      >
+        <DotGrid />
+
+        <View style={[styles.header, { paddingTop: insets.top + 60 }]}>
+          <Emblem course={course} size={48} radius={15} />
+          <View style={styles.titleBlock}>
+            <AppText variant="title" numberOfLines={2} style={styles.title}>
+              {course.title}
+            </AppText>
+            {total > 0 ? (
+              <ProgressBar
+                value={doneCount / total}
+                height={5}
+                fill={stone.moss}
+                track={stone.rockLight}
+                accessibilityLabel={`${doneCount} of ${total} ${chapterWord(total)} done`}
+              />
+            ) : null}
+          </View>
         </View>
 
-        <View style={styles.courseHeader}>
-          <Text style={styles.title}>{course.title}</Text>
-          <Text style={styles.description}>{course.description}</Text>
-        </View>
-
-        <View style={styles.progressCard}>
-          <View style={styles.progressHeader}>
-            <View>
-              <Text style={styles.progressSmall}>YOUR PROGRESS</Text>
-              <Text style={styles.progressPercent}>{course.progress}%</Text>
-            </View>
-            <View style={styles.progressIcon}>
-              <Ionicons name="trending-up" size={22} color={colors.orangeDeep} />
-            </View>
+        {total === 0 ? (
+          <EmptyState title="No chapters yet" message="Chapters will appear here soon." />
+        ) : (
+          <View
+            style={styles.route}
+            onLayout={(event) => {
+              routeTop.current = event.nativeEvent.layout.y;
+              scrollToNow();
+              checkAway(0, screenHeight);
+            }}
+          >
+            <Route
+              items={items}
+              foxKey={`course-${course.id}`}
+              den={{
+                reached: finished,
+                title: finished ? "You reached the den" : "The den",
+                caption: finished ? "Course complete" : `${total - doneCount} ${chapterWord(total - doneCount)} to go`,
+              }}
+              onPress={(i) => onSelectLesson(chapters[i])}
+            />
           </View>
+        )}
 
-          <View style={styles.progressBackground}>
-            <View style={[styles.progressBar, { width: `${course.progress}%` }]} />
-          </View>
-        </View>
-
-        {course.modules.map((module, moduleIndex) => (
-          <View key={module.id} style={styles.module}>
-            <View style={styles.moduleHeader}>
-              <View style={styles.moduleNumber}>
-                <Text style={styles.moduleNumberText}>{moduleIndex + 1}</Text>
-              </View>
-
-              <View style={styles.moduleHeaderText}>
-                <Text style={styles.moduleLabel}>MODULE {moduleIndex + 1}</Text>
-                <Text style={styles.moduleTitle}>{module.title}</Text>
-              </View>
-            </View>
-
-            <View style={styles.lessonList}>
-              {module.lessons.map((lesson, lessonIndex) => {
-                const isCompleted = lesson.completed;
-                const isCurrent = !isCompleted && !firstIncompleteFound;
-
-                if (isCurrent) firstIncompleteFound = true;
-                const isLocked = !isCompleted && !isCurrent;
-
-                return (
-                  <View key={lesson.id} style={styles.lessonRow}>
-                    <View style={styles.pathColumn}>
-                      {lessonIndex > 0 && (
-                        <View style={[styles.pathLineTop, isCompleted ? styles.pathCompleted : styles.pathLocked]} />
-                      )}
-
-                      {lessonIndex < module.lessons.length - 1 && (
-                        <View style={[styles.pathLineBottom, isCompleted ? styles.pathCompleted : styles.pathLocked]} />
-                      )}
-
-                      <TouchableOpacity
-                        activeOpacity={0.8}
-                        disabled={isLocked}
-                        onPress={() => { haptic.light(); onSelectLesson(lesson); }}
-                        style={[styles.node, isCompleted && styles.nodeCompleted, isCurrent && styles.nodeCurrent, isLocked && styles.nodeLocked]}
-                      >
-                        {isCompleted ? (
-                          <Ionicons name="checkmark" size={26} color="#fff" />
-                        ) : isCurrent ? (
-                          <Ionicons name="play" size={23} color="#fff" style={{ marginLeft: 2 }} />
-                        ) : (
-                          <Ionicons name="lock-closed" size={20} color={colors.textMuted} />
-                        )}
-                      </TouchableOpacity>
-                    </View>
-
-                    <TouchableOpacity
-                      activeOpacity={0.75}
-                      disabled={isLocked}
-                      onPress={() => { haptic.light(); onSelectLesson(lesson); }}
-                      style={[styles.lessonCard, isCurrent && styles.lessonCardCurrent, isLocked && styles.lessonCardLocked]}
-                    >
-                      <View style={styles.lessonText}>
-                        <Text style={[styles.lessonNumber, isLocked && styles.textLocked]}>LESSON {lessonIndex + 1}</Text>
-                        <Text style={[styles.lessonTitle, isLocked && styles.textLocked]} numberOfLines={2}>{lesson.title}</Text>
-                        {isCompleted && <Text style={styles.completedText}>Completed</Text>}
-                        {isCurrent && <Text style={styles.startText}>Continue learning →</Text>}
-                        {isLocked && <Text style={styles.lockedText}>Complete previous lesson</Text>}
-                      </View>
-
-                      {isCurrent && (
-                        <View style={styles.continueButton}>
-                          <Ionicons name="arrow-forward" size={20} color="#fff" />
-                        </View>
-                      )}
-
-                      {isCompleted && <Ionicons name="checkmark-circle" size={25} color={colors.mint} />}
-                    </TouchableOpacity>
-                  </View>
-                );
-              })}
-            </View>
-          </View>
-        ))}
+        {onToggleMine ? (
+          <Button
+            variant="text"
+            label={isMine ? "Remove from your courses" : "Add to your courses"}
+            onPress={onToggleMine}
+            style={styles.toggleMine}
+          />
+        ) : null}
       </ScrollView>
+
+      <StatusBarScrim visible={scrolled} color={stone.bg} />
+
+      {away && nextIndex >= 0 ? (
+        <View style={[styles.jumpRow, { bottom: TAB_BAR_HEIGHT + insets.bottom + space.md }]} pointerEvents="box-none">
+          <Pressable
+            onPress={jumpToNow}
+            accessibilityRole="button"
+            accessibilityLabel={`Jump to chapter ${nextIndex + 1}`}
+            style={({ pressed }) => [styles.jump, pressed && styles.pressed]}
+          >
+            <Ionicons name={away === "above" ? "arrow-up" : "arrow-down"} size={16} color={tokens.accentText} />
+            <AppText variant="label" tone="accent">
+              Chapter {nextIndex + 1}
+            </AppText>
+          </Pressable>
+        </View>
+      ) : null}
+
+      <Pressable
+        onPress={onBack}
+        hitSlop={space.sm}
+        accessibilityRole="button"
+        accessibilityLabel={backLabel ? `Back to ${backLabel}` : "Go back"}
+        style={({ pressed }) => [styles.back, { top: insets.top + space.sm }, pressed && styles.pressed]}
+      >
+        <Ionicons name="chevron-back" size={22} color={tokens.text} />
+      </Pressable>
 
       <BottomNavBar
         active="courses"
@@ -145,61 +243,95 @@ export default function CourseScreen({
           if (tab === "profile") onProfile();
         }}
       />
+
+      {finale ? (
+        <View style={StyleSheet.absoluteFill}>
+          <JourneyMoment
+            course={course}
+            celebrate
+            overline="COURSE COMPLETE"
+            title="You reached the den!"
+            body={`You finished ${course.title}.`}
+            chapters={total}
+            done={total}
+            caption={total === 1 ? "Chapter done" : `${total} of ${total} chapters done`}
+            buttonLabel="See my journey"
+            onPress={closeFinale}
+          />
+        </View>
+      ) : null}
     </View>
   );
 }
 
-const createStyles = (colors) => StyleSheet.create({
-  root: { flex: 1, backgroundColor: colors.screenBg },
-  container: { flex: 1, paddingHorizontal: 20 },
-  scrollContent: { paddingTop: 18, paddingBottom: 120 },
+const styles = StyleSheet.create({
+  root: {
+    flex: 1,
+    backgroundColor: stone.bg,
+  },
 
-  header: { marginBottom: 18 },
-  backButton: { flexDirection: "row", alignItems: "center", alignSelf: "flex-start", paddingVertical: 6, paddingRight: 12 },
-  backText: { fontSize: 15, fontWeight: "700", color: colors.text },
+  header: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: space.md,
+    paddingHorizontal: layout.gutter,
+  },
 
-  courseHeader: { marginBottom: 22 },
-  title: { fontSize: 30, fontWeight: "900", color: colors.text, letterSpacing: -0.7 },
-  description: { marginTop: 7, fontSize: 14, lineHeight: 21, color: colors.textSecondary },
+  titleBlock: {
+    flex: 1,
+    gap: space.sm,
+  },
 
-  progressCard: { backgroundColor: colors.card, borderRadius: radius.xl, padding: 18, marginBottom: 30, borderWidth: 1, borderColor: colors.border },
-  progressHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
-  progressSmall: { fontSize: 10, fontWeight: "800", letterSpacing: 1, color: colors.textMuted },
-  progressPercent: { marginTop: 2, fontSize: 24, fontWeight: "900", color: colors.text },
-  progressIcon: { width: 42, height: 42, borderRadius: 21, backgroundColor: colors.orangeLight, alignItems: "center", justifyContent: "center" },
-  progressBackground: { height: 10, backgroundColor: colors.bgSecondary, borderRadius: 10, marginTop: 15, overflow: "hidden" },
-  progressBar: { height: "100%", backgroundColor: colors.orange, borderRadius: 10 },
+  title: {
+    fontSize: 22,
+    lineHeight: 27,
+  },
 
-  module: { marginBottom: 32 },
-  moduleHeader: { flexDirection: "row", alignItems: "center", marginBottom: 18 },
-  moduleNumber: { width: 42, height: 42, borderRadius: 12, backgroundColor: colors.orange, alignItems: "center", justifyContent: "center", marginRight: 12 },
-  moduleNumberText: { color: "#fff", fontSize: 17, fontWeight: "800" },
-  moduleHeaderText: { flex: 1 },
-  moduleLabel: { fontSize: 11, color: colors.textMuted, fontWeight: "800", letterSpacing: 1 },
-  moduleTitle: { fontSize: 18, color: colors.text, fontWeight: "800", marginTop: 3 },
+  route: {
+    marginTop: space.lg,
+    marginHorizontal: layout.gutter,
+  },
 
-  lessonList: { paddingLeft: 8 },
-  lessonRow: { flexDirection: "row", alignItems: "stretch", marginBottom: 12 },
-  pathColumn: { width: NODE_SIZE, alignItems: "center", position: "relative" },
-  pathLineTop: { position: "absolute", top: -12, width: 2, height: 20, backgroundColor: colors.border },
-  pathLineBottom: { position: "absolute", bottom: -12, width: 2, height: 20, backgroundColor: colors.border },
-  pathCompleted: { backgroundColor: colors.mint },
-  pathLocked: { backgroundColor: colors.border },
+  pressed: {
+    opacity: 0.7,
+  },
 
-  node: { width: NODE_SIZE, height: NODE_SIZE, borderRadius: NODE_SIZE / 2, alignItems: "center", justifyContent: "center", backgroundColor: colors.card, borderWidth: 2, borderColor: colors.border, zIndex: 2 },
-  nodeCompleted: { backgroundColor: colors.mint, borderColor: colors.mint },
-  nodeCurrent: { backgroundColor: colors.orange, borderColor: colors.orange },
-  nodeLocked: { backgroundColor: colors.bgSecondary, borderColor: colors.border },
+  jumpRow: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    alignItems: "center",
+  },
 
-  lessonCard: { flex: 1, backgroundColor: colors.card, borderRadius: radius.lg, borderWidth: 1, borderColor: colors.border, paddingVertical: 14, paddingHorizontal: 14, marginLeft: 10, flexDirection: "row", alignItems: "center" },
-  lessonCardCurrent: { borderColor: colors.orange, backgroundColor: colors.orangeLight },
-  lessonCardLocked: { opacity: 0.8 },
-  lessonText: { flex: 1 },
-  lessonNumber: { fontSize: 11, color: colors.textMuted, fontWeight: "800", letterSpacing: 0.8 },
-  lessonTitle: { fontSize: 16, fontWeight: "800", color: colors.text, marginTop: 5 },
-  completedText: { marginTop: 5, color: colors.mint, fontWeight: "700", fontSize: 12 },
-  startText: { marginTop: 5, color: colors.orangeDeep, fontWeight: "700", fontSize: 12 },
-  lockedText: { marginTop: 5, color: colors.textMuted, fontWeight: "600", fontSize: 12 },
-  textLocked: { color: colors.textMuted },
-  continueButton: { width: 34, height: 34, borderRadius: 17, backgroundColor: colors.orange, alignItems: "center", justifyContent: "center", marginLeft: 10 },
+  jump: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: space.xs + 2,
+    height: 40,
+    paddingHorizontal: space.lg,
+    borderRadius: 14,
+    backgroundColor: tokens.surface,
+    borderWidth: 1,
+    borderColor: tokens.divider,
+    shadowColor: "#2B1A38",
+    shadowOpacity: 0.12,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 4,
+  },
+
+  toggleMine: {
+    marginTop: space.xl,
+  },
+
+  back: {
+    position: "absolute",
+    left: 20,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: tokens.surface,
+    alignItems: "center",
+    justifyContent: "center",
+  },
 });
