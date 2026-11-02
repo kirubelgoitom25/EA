@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { ChevronLeft, Flame, Zap } from "lucide-react";
+import { AlertTriangle, ChevronLeft, Flame, Zap } from "lucide-react";
 import { api } from "../lib/api.js";
 import {
   courseLabel,
@@ -95,6 +95,9 @@ export default function ClassPage() {
   const activeThisWeek = activeStudents.filter(
     (s) => toNumber(s.weekly_xp) > 0,
   ).length;
+  const needsAttention = activeStudents.filter(
+    (s) => s.attention && s.attention.length > 0,
+  );
   const presenceLoaded = Object.keys(presence).length > 0;
   const onlineNow = activeStudents.filter((s) => presence[s.id]?.online).length;
 
@@ -129,6 +132,31 @@ export default function ClassPage() {
           </div>
         </div>
       </section>
+
+      {needsAttention.length > 0 && (
+        <section className="card section attention-card" aria-label="Needs attention">
+          <div className="card-head">
+            <h2 className="label">
+              <AlertTriangle size={14} /> Needs attention · {needsAttention.length}
+            </h2>
+          </div>
+          {needsAttention.map((s) => (
+            <Link className="row row-link" to={`/students/${s.id}`} key={s.id}>
+              <Avatar name={s.name} />
+              <span className="who">
+                <span className="name">{s.name}</span>
+              </span>
+              <span className="attention-flags">
+                {s.attention.map((f) => (
+                  <span className="pill pill-warn" key={f.code}>
+                    {f.label}
+                  </span>
+                ))}
+              </span>
+            </Link>
+          ))}
+        </section>
+      )}
 
       <section className="card">
         <div className="card-head">

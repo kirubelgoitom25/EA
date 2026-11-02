@@ -1,5 +1,5 @@
 import { Link, Outlet, useLocation } from "react-router-dom";
-import { BookOpen, LayoutGrid, LogOut, Trophy } from "lucide-react";
+import { BookOpen, LayoutGrid, LogOut, PenLine, Trophy } from "lucide-react";
 import { useAuth } from "../auth/AuthContext.jsx";
 
 export default function Shell() {
@@ -9,9 +9,10 @@ export default function Shell() {
     pathname.startsWith("/classes") || pathname.startsWith("/students");
   const rankingsActive = pathname.startsWith("/rankings");
   const contentActive = pathname.startsWith("/content");
+  const studioActive = pathname.startsWith("/studio");
 
   return (
-    <div className="shell">
+    <div className={`shell${studioActive ? " studio-theme" : ""}`}>
       <aside className="sidebar">
         <div className="brand">
           <span className="brand-badge">EA</span>
@@ -24,6 +25,13 @@ export default function Shell() {
           >
             <LayoutGrid size={20} />
             <span>Classes</span>
+          </Link>
+          <Link
+            to="/studio"
+            className={`nav-item${studioActive ? " active" : ""}`}
+          >
+            <PenLine size={20} />
+            <span>Studio</span>
           </Link>
           <Link
             to="/content"

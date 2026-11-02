@@ -881,3 +881,19 @@
 .title-row .input {
   flex: 1;
 }
+
+.pill-warn {
+  background: #fff1e0;
+  color: #a2530a;
+}
+
+.attention-flags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.attention-card {
+  margin-bottom: 20px;
+}
