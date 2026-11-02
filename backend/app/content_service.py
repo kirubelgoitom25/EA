@@ -12,7 +12,7 @@ from sqlalchemy import case, delete, func, select, text, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
-from app import content_access
+from app import content_access, studio_sync
 from app.content_rules import (
     MAX_PRACTICE_ITEMS,
     MAX_QUIZ_QUESTIONS,
@@ -89,9 +89,11 @@ def _lock_quiz(db: Session, lesson_id: str) -> Quiz:
             index_elements=["lesson_id"]
         )
     )
-    return db.execute(
+    quiz = db.execute(
         select(Quiz).where(Quiz.lesson_id == lesson_id).with_for_update()
     ).scalar_one()
+    studio_sync.ensure_quiz_activity(db, quiz)  # a quiz made here shows up as an activity
+    return quiz
 
 
 def get_quiz(db: Session, teacher_id: uuid.UUID, lesson_id: str) -> dict:
@@ -186,6 +188,7 @@ def delete_question(db: Session, teacher_id: uuid.UUID, question_id: int) -> Non
                     status_code=409,
                     detail="This quiz has student attempts and cannot be left empty. Edit the question instead.",
                 )
+            studio_sync.drop_quiz_activity(db, quiz.id)
             db.execute(delete(Quiz).where(Quiz.id == quiz.id))
         else:
             db.execute(delete(QuizQuestion).where(QuizQuestion.id == question_id))
@@ -279,9 +282,11 @@ def _lock_practice(db: Session, lesson_id: str, title: str) -> Practice:
         .values(lesson_id=lesson_id, title=title)
         .on_conflict_do_nothing(index_elements=["lesson_id"])
     )
-    return db.execute(
+    practice = db.execute(
         select(Practice).where(Practice.lesson_id == lesson_id).with_for_update()
     ).scalar_one()
+    studio_sync.ensure_practice_activity(db, practice)
+    return practice
 
 
 def get_practice(db: Session, teacher_id: uuid.UUID, lesson_id: str) -> dict:
@@ -381,6 +386,7 @@ def delete_item(db: Session, teacher_id: uuid.UUID, item_id: int) -> None:
                     status_code=409,
                     detail="This practice has student attempts and cannot be left empty. Edit the item instead.",
                 )
+            studio_sync.drop_practice_activity(db, practice.id)
             db.execute(delete(Practice).where(Practice.id == practice.id))
         else:
             db.execute(delete(PracticeItem).where(PracticeItem.id == item_id))

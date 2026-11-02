@@ -1,22 +1,15 @@
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import text
 from sqlalchemy.orm import Session, selectinload
 
+from app import studio_access
 from app.database import get_db
 from app.deps import get_current_user
-from app.models import ClassCourse, Course, LessonProgress, Module
+from app.models import Course, LessonProgress, Module
 from app.schemas import CourseDetailOut, CourseListItemOut
 
 router = APIRouter(prefix="/courses", tags=["courses"])
-
-TEACHER_COURSE_IDS_QUERY = text("""
-    select distinct cc.course_id
-    from class_teachers ct
-    join class_courses cc on cc.class_id = ct.class_id
-    where ct.teacher_id = :teacher_id
-""")
 
 
 def _completed_lesson_ids(db: Session, student_id: uuid.UUID) -> set[str]:
@@ -28,16 +21,12 @@ def _completed_lesson_ids(db: Session, student_id: uuid.UUID) -> set[str]:
     return {row[0] for row in rows}
 
 
-def _visible_course_ids_for_student(db: Session, class_id) -> set[str]:
-    if class_id is None:
-        return set()
-    rows = db.query(ClassCourse.course_id).filter(ClassCourse.class_id == class_id).all()
-    return {row[0] for row in rows}
+def _visible_course_ids_for_student(db: Session, student_id: uuid.UUID, class_id) -> set[str]:
+    return studio_access.visible_course_ids_for_student(db, student_id, class_id)
 
 
 def _visible_course_ids_for_teacher(db: Session, teacher_id: uuid.UUID) -> set[str]:
-    rows = db.execute(TEACHER_COURSE_IDS_QUERY, {"teacher_id": teacher_id}).all()
-    return {row[0] for row in rows}
+    return studio_access.visible_course_ids_for_teacher(db, teacher_id)
 
 
 def _course_to_dict(course: Course, completed: set[str]) -> dict:
@@ -54,9 +43,11 @@ def _course_to_dict(course: Course, completed: set[str]) -> dict:
                     "completed": lesson.id in completed,
                 }
                 for lesson in module.lessons
+                if lesson.archived_at is None
             ],
         }
         for module in course.modules
+        if module.archived_at is None
     ]
 
     total = sum(len(module["lessons"]) for module in modules_out)
@@ -82,7 +73,9 @@ def list_courses(
     query = db.query(Course).options(selectinload(Course.modules).selectinload(Module.lessons))
 
     if current_user["role"] == "student":
-        visible_ids = _visible_course_ids_for_student(db, current_user.get("class_id"))
+        visible_ids = _visible_course_ids_for_student(
+            db, uuid.UUID(current_user["id"]), current_user.get("class_id")
+        )
         query = query.filter(Course.id.in_(visible_ids)) if visible_ids else query.filter(False)
     elif current_user["role"] == "teacher":
         visible_ids = _visible_course_ids_for_teacher(db, uuid.UUID(current_user["id"]))
@@ -99,7 +92,9 @@ def get_course(
     db: Session = Depends(get_db),
 ):
     if current_user["role"] == "student":
-        visible_ids = _visible_course_ids_for_student(db, current_user.get("class_id"))
+        visible_ids = _visible_course_ids_for_student(
+            db, uuid.UUID(current_user["id"]), current_user.get("class_id")
+        )
         if course_id not in visible_ids:
             raise HTTPException(status_code=404, detail="Course not found")
     elif current_user["role"] == "teacher":

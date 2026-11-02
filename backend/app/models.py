@@ -2,6 +2,7 @@ import uuid
 
 from sqlalchemy import (
     Boolean,
+    CheckConstraint,
     Column,
     Date,
     DateTime,
@@ -40,6 +41,19 @@ class Course(Base):
     title = Column(String, nullable=False)
     description = Column(Text, nullable=False)
     sort_order = Column(Integer, nullable=False, default=0)
+    # Course Studio. Legacy courses are ownerless and published; created_at and
+    # published_at stay NULL for them because the real dates are unknown.
+    owner_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("profiles.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    status = Column(String, nullable=False, default="draft", server_default="draft")
+    created_at = Column(DateTime(timezone=True), nullable=True, server_default=func.now())
+    updated_at = Column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    published_at = Column(DateTime(timezone=True), nullable=True)
 
     modules = relationship(
         "Module", back_populates="course", order_by="Module.sort_order"
@@ -55,6 +69,7 @@ class Module(Base):
     )
     title = Column(String, nullable=False)
     sort_order = Column(Integer, nullable=False, default=0)
+    archived_at = Column(DateTime(timezone=True), nullable=True)
 
     course = relationship("Course", back_populates="modules")
     lessons = relationship(
@@ -73,6 +88,7 @@ class Lesson(Base):
     duration = Column(String, nullable=True)
     video_url = Column(String, nullable=True)
     sort_order = Column(Integer, nullable=False, default=0)
+    archived_at = Column(DateTime(timezone=True), nullable=True)
 
     module = relationship("Module", back_populates="lessons")
 
@@ -89,9 +105,8 @@ class LessonProgress(Base):
         ForeignKey("profiles.id", ondelete="CASCADE"),
         nullable=False,
     )
-    lesson_id = Column(
-        String, ForeignKey("lessons.id", ondelete="CASCADE"), nullable=False
-    )
+    # No ON DELETE CASCADE: student history must never vanish with content.
+    lesson_id = Column(String, ForeignKey("lessons.id"), nullable=False)
     completed_at = Column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
@@ -138,9 +153,7 @@ class QuizAttempt(Base):
         ForeignKey("profiles.id", ondelete="CASCADE"),
         nullable=False,
     )
-    quiz_id = Column(
-        Integer, ForeignKey("quizzes.id", ondelete="CASCADE"), nullable=False
-    )
+    quiz_id = Column(Integer, ForeignKey("quizzes.id"), nullable=False)
     attempt_number = Column(Integer, nullable=False)
     score = Column(Integer, nullable=False)
     total_questions = Column(Integer, nullable=False)
@@ -195,9 +208,7 @@ class PracticeAttempt(Base):
         ForeignKey("profiles.id", ondelete="CASCADE"),
         nullable=False,
     )
-    practice_id = Column(
-        Integer, ForeignKey("practices.id", ondelete="CASCADE"), nullable=False
-    )
+    practice_id = Column(Integer, ForeignKey("practices.id"), nullable=False)
     score = Column(Integer, nullable=False)
     total_items = Column(Integer, nullable=False)
     xp_earned = Column(Numeric(6, 2), nullable=False)
@@ -255,3 +266,60 @@ class ClassTeacher(Base):
 
     class_id = Column(String, ForeignKey("classes.id", ondelete="CASCADE"), primary_key=True)
     teacher_id = Column(UUID(as_uuid=True), ForeignKey("profiles.id", ondelete="CASCADE"), primary_key=True)
+
+
+class LessonActivity(Base):
+    """One ordered step inside a lesson: video, quiz, practice or reading.
+
+    is_required is advisory only. It never blocks lesson completion.
+    """
+
+    __tablename__ = "lesson_activities"
+    __table_args__ = (
+        CheckConstraint(
+            "kind in ('video','quiz','practice','reading')", name="lesson_activities_kind_check"
+        ),
+    )
+
+    id = Column(Integer, primary_key=True)
+    lesson_id = Column(
+        String, ForeignKey("lessons.id", ondelete="CASCADE"), nullable=False
+    )
+    kind = Column(String, nullable=False)
+    sort_order = Column(Integer, nullable=False, default=0)
+    title = Column(String, nullable=False)
+    is_required = Column(Boolean, nullable=False, default=False, server_default="false")
+    video_url = Column(Text, nullable=True)
+    quiz_id = Column(Integer, nullable=True)
+    practice_id = Column(Integer, nullable=True)
+    reading_body = Column(Text, nullable=True)
+    legacy_ref = Column(String, nullable=True, unique=True)
+    archived_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at = Column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class ActivityProgress(Base):
+    __tablename__ = "activity_progress"
+    __table_args__ = (
+        UniqueConstraint(
+            "student_id", "activity_id", name="activity_progress_student_activity_key"
+        ),
+    )
+
+    id = Column(Integer, primary_key=True)
+    student_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("profiles.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    # No cascade: progress on an activity must block deleting it.
+    activity_id = Column(Integer, ForeignKey("lesson_activities.id"), nullable=False)
+    completed_at = Column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    source = Column(String, nullable=False, default="manual")

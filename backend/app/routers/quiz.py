@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func
 from sqlalchemy.orm import Session, selectinload
 
+from app import studio_sync
 from app.access import lesson_is_in_class
 from app.database import get_db
 from app.deps import require_student
@@ -35,7 +36,8 @@ def _get_quiz_or_404(db: Session, lesson_id: str) -> Quiz:
         .filter(Quiz.lesson_id == lesson_id)
         .first()
     )
-    if quiz is None:
+    # No questions, or an archived quiz activity, looks exactly like "no quiz".
+    if quiz is None or not quiz.questions or studio_sync.is_archived(db, quiz_id=quiz.id):
         raise HTTPException(status_code=404, detail="Quiz not found")
     return quiz
 
@@ -58,7 +60,9 @@ def get_quiz(
     # The lesson id comes from the URL, so it is never trusted. Only lessons of
     # the student's own class are allowed, and anything else looks exactly like
     # "no such quiz".
-    if not lesson_is_in_class(db, lesson_id, current_user.get("class_id")):
+    if not lesson_is_in_class(
+        db, lesson_id, current_user.get("class_id"), uuid.UUID(current_user["id"])
+    ):
         raise HTTPException(status_code=404, detail="Quiz not found")
 
     quiz = _get_quiz_or_404(db, lesson_id)
@@ -89,7 +93,9 @@ def submit_quiz(
     current_user: dict = Depends(require_student),
     db: Session = Depends(get_db),
 ):
-    if not lesson_is_in_class(db, lesson_id, current_user.get("class_id")):
+    if not lesson_is_in_class(
+        db, lesson_id, current_user.get("class_id"), uuid.UUID(current_user["id"])
+    ):
         raise HTTPException(status_code=404, detail="Quiz not found")
 
     quiz = _get_quiz_or_404(db, lesson_id)
@@ -139,6 +145,7 @@ def submit_quiz(
         db.add(LessonProgress(student_id=student_id, lesson_id=lesson_id))
 
     award_xp(db, student_id, xp_earned, "quiz", quiz.id)
+    studio_sync.record_attempt_progress(db, student_id, lesson_id, "quiz")
     db.commit()
 
     return {

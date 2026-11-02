@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import bindparam, text
 from sqlalchemy.orm import Session
 
+from app.attention import class_attention
 from app.course_activity import current_courses_for_class
 from app.database import get_db
 from app.deps import require_teacher
@@ -64,6 +65,7 @@ CLASS_LESSON_TOTAL_QUERY = text("""
     join modules m on m.course_id = cc.course_id
     join lessons l on l.module_id = m.id
     where cc.class_id = :class_id
+      and m.archived_at is null and l.archived_at is null
 """)
 
 # How many of those lessons each student finished.
@@ -78,6 +80,7 @@ CLASS_LESSONS_DONE_QUERY = text("""
           join modules m on m.course_id = cc.course_id
           join lessons l on l.module_id = m.id
           where cc.class_id = :class_id
+            and m.archived_at is null and l.archived_at is null
       )
     group by lp.student_id
 """)
@@ -89,6 +92,7 @@ CLASS_COURSES_QUERY = text("""
     join modules m on m.course_id = c.id
     join lessons l on l.module_id = m.id
     where cc.class_id = :class_id
+      and m.archived_at is null and l.archived_at is null
     group by c.id, c.title, c.sort_order
     order by c.sort_order
 """)
@@ -102,6 +106,7 @@ CLASS_COURSE_DONE_QUERY = text("""
     join modules m on m.id = l.module_id
     join class_courses cc on cc.course_id = m.course_id and cc.class_id = :class_id
     where p.role = 'student' and p.is_active and p.class_id = :class_id
+      and m.archived_at is null and l.archived_at is null
     group by m.course_id
 """)
 
@@ -176,6 +181,7 @@ def list_class_students(
     done_rows = db.execute(CLASS_LESSONS_DONE_QUERY, {"class_id": class_id}).mappings().all()
     done_by_student = {str(r["student_id"]): r["done"] for r in done_rows}
     current_courses = current_courses_for_class(db, class_id)
+    flags = class_attention(db, class_id, [str(r["id"]) for r in rows if r["is_active"]])
 
     result = []
     for r in rows:
@@ -192,6 +198,7 @@ def list_class_students(
                 "progress": round((done / total_lessons) * 100) if total_lessons else 0,
                 "last_active_at": r["last_active_at"],
                 "current_course": current_courses.get(str(r["id"])),
+                "attention": flags.get(str(r["id"]), []),
             }
         )
     return result

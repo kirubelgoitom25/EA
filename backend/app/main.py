@@ -3,7 +3,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
 
-from app.routers import auth, classes, courses, practice, presence, quiz, stats, students, teacher_content
+from app.routers import auth, classes, courses, practice, presence, quiz, stats, students, studio, teacher_content
 from fastapi import Depends, FastAPI, Request
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -28,6 +28,10 @@ app.add_middleware(
         "http://127.0.0.1:5173",
         "http://localhost:3000",
         "http://127.0.0.1:3000",
+        "http://localhost:5174",
+        "http://127.0.0.1:5174",
+        "http://localhost:8081",
+        "http://127.0.0.1:8081",
     ],
     allow_methods=["*"],
     allow_headers=["*"],
@@ -53,6 +57,8 @@ app.include_router(stats.router)
 app.include_router(classes.router)
 app.include_router(presence.router)
 app.include_router(teacher_content.router)
+app.include_router(studio.teacher_router)
+app.include_router(studio.student_router)
 
 
 @app.get("/health")

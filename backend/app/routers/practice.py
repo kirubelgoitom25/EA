@@ -4,6 +4,7 @@ from decimal import Decimal
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session, selectinload
 
+from app import studio_sync
 from app.access import lesson_is_in_class
 from app.database import get_db
 from app.deps import require_student
@@ -27,7 +28,7 @@ def _get_practice_or_404(db: Session, lesson_id: str) -> Practice:
         .filter(Practice.lesson_id == lesson_id)
         .first()
     )
-    if practice is None:
+    if practice is None or not practice.items or studio_sync.is_archived(db, practice_id=practice.id):
         raise HTTPException(status_code=404, detail="Practice not found")
     return practice
 
@@ -51,7 +52,9 @@ def get_practice(
     db: Session = Depends(get_db),
 ):
     # Only lessons of the student's own class are allowed.
-    if not lesson_is_in_class(db, lesson_id, current_user.get("class_id")):
+    if not lesson_is_in_class(
+        db, lesson_id, current_user.get("class_id"), uuid.UUID(current_user["id"])
+    ):
         raise HTTPException(status_code=404, detail="Practice not found")
 
     practice = _get_practice_or_404(db, lesson_id)
@@ -84,7 +87,9 @@ def submit_practice(
     current_user: dict = Depends(require_student),
     db: Session = Depends(get_db),
 ):
-    if not lesson_is_in_class(db, lesson_id, current_user.get("class_id")):
+    if not lesson_is_in_class(
+        db, lesson_id, current_user.get("class_id"), uuid.UUID(current_user["id"])
+    ):
         raise HTTPException(status_code=404, detail="Practice not found")
 
     practice = _get_practice_or_404(db, lesson_id)
@@ -145,6 +150,7 @@ def submit_practice(
         db.add(LessonProgress(student_id=student_id, lesson_id=lesson_id))
 
     award_xp(db, student_id, xp_earned, "practice", practice.id)
+    studio_sync.record_attempt_progress(db, student_id, lesson_id, "practice")
     db.commit()
 
     return {

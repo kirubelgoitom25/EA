@@ -169,6 +169,11 @@ class StudentDetailOut(StudentOut):
     current_course: Optional[CurrentCourseOut] = None
     
 
+class AttentionFlagOut(BaseModel):
+    code: str
+    label: str
+
+
 class ClassStudentOut(BaseModel):
     id: str
     name: str
@@ -180,6 +185,7 @@ class ClassStudentOut(BaseModel):
     progress: int
     last_active_at: Optional[datetime] = None
     current_course: Optional[CurrentCourseOut] = None
+    attention: list[AttentionFlagOut] = []
 
 
 class ClassCourseOut(BaseModel):

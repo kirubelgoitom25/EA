@@ -40,6 +40,7 @@ COURSE_PROGRESS_QUERY = text("""
     join lessons l on l.module_id = m.id
     left join lesson_progress lp on lp.lesson_id = l.id and lp.student_id = :sid
     where cc.class_id = :class_id
+      and m.archived_at is null and l.archived_at is null
     group by c.id, c.title, c.sort_order
     order by c.sort_order
 """)

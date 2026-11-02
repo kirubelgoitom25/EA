@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.deps import require_student, require_teacher
 from app.schemas import HeartbeatIn, PresenceOut
+from app.studio_access import student_can_see_lesson
 
 router = APIRouter(tags=["presence"])
 
@@ -15,15 +16,6 @@ router = APIRouter(tags=["presence"])
 # seconds. The student app sends a heartbeat every 45 seconds, so one or two
 # missed beats are tolerated.
 ONLINE_WINDOW_SECONDS = 120
-
-# The lesson must belong to a course assigned to the student's own class.
-LESSON_IN_CLASS_QUERY = text("""
-    select 1
-    from lessons l
-    join modules m on m.id = l.module_id
-    join class_courses cc on cc.course_id = m.course_id
-    where l.id = :lesson_id and cc.class_id = :class_id
-""")
 
 # One row per student. A write is skipped when the stored one is less than 20
 # seconds old, unless the lesson changed, so the table cannot be hammered.
@@ -64,13 +56,11 @@ def heartbeat(
     # lesson of a course assigned to this student's own class.
     lesson_id = None
     requested = body.lesson_id if body else None
-    if requested and current_user.get("class_id"):
-        found = db.execute(
-            LESSON_IN_CLASS_QUERY,
-            {"lesson_id": requested, "class_id": current_user["class_id"]},
-        ).first()
-        if found is not None:
-            lesson_id = requested
+    # Open to the student: a course given to their class, or a published Studio course.
+    if requested and student_can_see_lesson(
+        db, student_id, current_user.get("class_id"), requested
+    ):
+        lesson_id = requested
 
     db.execute(HEARTBEAT_UPSERT, {"student_id": student_id, "lesson_id": lesson_id})
     db.commit()
