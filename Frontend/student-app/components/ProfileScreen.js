@@ -145,8 +145,8 @@ function TailFlame() {
     <Svg width={18} height={18} viewBox="0 0 24 24">
       <Defs>
         <LinearGradient id="profileFlame" x1="0" y1="1" x2="0" y2="0">
-          <Stop offset="0" stopColor={tokens.tailEnd} />
-          <Stop offset="1" stopColor={tokens.tailStart} />
+          <Stop offset="0" stopColor="#E8472B" />
+          <Stop offset="1" stopColor={tokens.flame} />
         </LinearGradient>
       </Defs>
       <Path d="M12 2c1 4 5 6 5 11a5 5 0 0 1-10 0c0-2 1-3.5 2-4.5 0 2 1 3 2 3 0-4-1-6 1-9.5z" fill="url(#profileFlame)" />

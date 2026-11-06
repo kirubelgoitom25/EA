@@ -3,6 +3,7 @@ import { Pressable, ScrollView, StyleSheet, View, useWindowDimensions } from "re
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { mascotVariant } from "../config";
 import { loadProgressSummary } from "../services/chapterProgress";
 import { hasSeen, markSeen } from "../services/journey";
 import { chapterWord, isCourseComplete } from "../services/journeyModel";
@@ -11,14 +12,17 @@ import BottomNavBar from "./BottomNavBar";
 import JourneyMoment from "./JourneyMoment";
 import { firstOpenChapter, flattenChapters } from "./session/sessionModel";
 import AppText from "./ui/AppText";
+import { FoxFigure } from "./ui/CourseFox";
 import Button from "./ui/Button";
 import DotGrid from "./ui/DotGrid";
 import Emblem from "./ui/Emblem";
 import EmptyState from "./ui/EmptyState";
+import { LEDGE_FOX, scaleOf } from "./ui/foxPlacement";
 import { useFoxReact } from "./ui/FoxContext";
 import ProgressBar from "./ui/ProgressBar";
 import Route, { routeMetrics } from "./ui/Route";
-import { TAB_BAR_HEIGHT } from "./ui/Screen";
+import { NAV_BAR_HEIGHT, TAB_BAR_HEIGHT } from "./ui/Screen";
+import { useReducedMotion } from "./ui/motion";
 import StatusBarScrim, { scrimOnScroll } from "./ui/StatusBarScrim";
 
 // A course as a journey. No hero picture: the course's own emblem (its colour, pattern and subject)
@@ -42,7 +46,8 @@ export default function CourseScreen({
   const insets = useSafeAreaInsets();
   const foxReact = useFoxReact();
   const scroll = useRef(null);
-  const { height: screenHeight } = useWindowDimensions();
+  const { width: screenWidth, height: screenHeight } = useWindowDimensions();
+  const reduce = useReducedMotion();
   const [scrolled, setScrolled] = useState(false);
   const [away, setAway] = useState(null); // "above" / "below": your chapter is out of view
   const chapters = flattenChapters(course);
@@ -142,6 +147,16 @@ export default function CourseScreen({
 
   return (
     <View style={styles.root}>
+      {/* "ledge": the fox stands on the tab bar, drawn under the page so the path scrolls over her */}
+      {mascotVariant === "ledge" ? (
+        <FoxFigure
+          spec={LEDGE_FOX}
+          k={scaleOf(screenWidth)}
+          motion="sway"
+          reduce={reduce}
+          style={{ position: "absolute", left: LEDGE_FOX.left * scaleOf(screenWidth), bottom: NAV_BAR_HEIGHT + insets.bottom }}
+        />
+      ) : null}
       <ScrollView
         ref={scroll}
         contentContainerStyle={{ flexGrow: 1, paddingBottom: TAB_BAR_HEIGHT + insets.bottom + space.xxl }}
@@ -185,6 +200,7 @@ export default function CourseScreen({
           >
             <Route
               items={items}
+              mascot={mascotVariant}
               foxKey={`course-${course.id}`}
               den={{
                 reached: finished,

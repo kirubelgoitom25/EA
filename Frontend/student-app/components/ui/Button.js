@@ -3,7 +3,7 @@ import { ActivityIndicator, Animated, Easing, Pressable, StyleSheet } from "reac
 import { Ionicons } from "@expo/vector-icons";
 
 import { haptic } from "../../services/feedback";
-import { layout, space, tokens } from "../../theme";
+import { fonts, layout, space, tokens } from "../../theme";
 import AppText from "./AppText";
 
 // "primary" is the one main action on a screen: an ember pill with a
@@ -78,7 +78,7 @@ export default function Button({
                   : tone === "danger"
                     ? tokens.wrong
                     : tokens.text,
-              ...(isPrimary && { letterSpacing: 0.4 }),
+              ...(isPrimary && { letterSpacing: 0.6, fontFamily: fonts.display }),
             }}
           >
             {label}
@@ -92,12 +92,12 @@ export default function Button({
   return <Animated.View style={{ alignSelf: "center", transform: [{ scale }] }}>{button}</Animated.View>;
 }
 
-const LIP = 4;
+const LIP = 5;
 
 const styles = StyleSheet.create({
   primary: {
     height: layout.buttonHeight,
-    borderRadius: layout.buttonHeight / 2,
+    borderRadius: layout.radius,
     backgroundColor: tokens.accent,
     borderBottomWidth: LIP,
     borderBottomColor: tokens.accentLip,

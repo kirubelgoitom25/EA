@@ -21,7 +21,7 @@ export default function Stone({ status = "todo", size = 72, label, icon, colors 
   if (status === "done") {
     return (
       <LinearGradient colors={colors ?? [tokens.tailStart, tokens.tailEnd]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={box}>
-        {size >= 28 ? <Ionicons name="checkmark" size={Math.round(size * 0.42)} color={tokens.onAccent} /> : null}
+        {size >= 28 ? <Ionicons name="checkmark" size={Math.round(size * 0.42)} color="#FFFFFF" /> : null}
       </LinearGradient>
     );
   }

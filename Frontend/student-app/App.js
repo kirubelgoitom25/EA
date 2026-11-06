@@ -15,10 +15,10 @@ import {
 } from "react-native";
 import {
   useFonts,
-  Inter_400Regular,
-  Inter_600SemiBold,
-} from "@expo-google-fonts/inter";
-import { BricolageGrotesque_700Bold } from "@expo-google-fonts/bricolage-grotesque";
+  PlusJakartaSans_500Medium,
+  PlusJakartaSans_700Bold,
+  PlusJakartaSans_800ExtraBold,
+} from "@expo-google-fonts/plus-jakarta-sans";
 
 import LoginScreen from "./components/LoginScreen";
 import HomeScreen from "./components/HomeScreen";
@@ -63,12 +63,12 @@ const EMPTY_RANKING = { entries: [], yourPosition: null, yourXp: 0 };
 export default function App() {
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
-  // Inter is the EA typeface. If it fails to load the app still works,
+  // Plus Jakarta Sans is the EA typeface. If it fails to load the app still works,
   // with the system font.
   const [fontsLoaded, fontError] = useFonts({
-    Inter_400Regular,
-    Inter_600SemiBold,
-    BricolageGrotesque_700Bold,
+    PlusJakartaSans_500Medium,
+    PlusJakartaSans_700Bold,
+    PlusJakartaSans_800ExtraBold,
   });
 
   const [user, setUser] = useState(null);

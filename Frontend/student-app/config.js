@@ -8,3 +8,9 @@ export const PRODUCTION_API_URL = "https://ea-mcwt.onrender.com";
 // EXPO_PUBLIC_API_URL points a dev build at a local backend; unset means production.
 export const API_BASE_URL =
   process.env.EXPO_PUBLIC_API_URL || PRODUCTION_API_URL;
+
+// The fox and the dotted line on a course's path (CourseScreen): "title" (she stands on the current
+// chapter's title; the dots drift along), "edge" (her head peeks in from the screen's edge; the line
+// into the current chapter glows) or "ledge" (she stands on the tab bar; dark dots run to the current
+// chapter).
+export const mascotVariant = "title"; // 'title' | 'edge' | 'ledge'

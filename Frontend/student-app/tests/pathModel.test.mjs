@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { SWAY, bezierPoint, layoutPath, pathD, pathPoints, pointAt, segment, travelled, wordsSide, xOf } from "../components/ui/pathModel.js";
+import { SWAY, ZIG, bezierPoint, layoutPath, pathD, pathLength, pathPoints, pointAt, segment, travelled, wordsSide, xOf } from "../components/ui/pathModel.js";
 
 const item = (status, extra = {}) => ({ status, ...extra });
 const items = (...statuses) => statuses.map((status) => item(status));
@@ -89,4 +89,49 @@ test("the travelled path ends where you stand", () => {
   assert.equal(travelled(items("done", "done", "done"), den), 2);
   assert.equal(travelled(items("done", "done"), { reached: true }), 2);
   assert.equal(travelled(items("done", "next", "done"), den), 1);
+});
+
+test("the zigzag puts odd chapters left and even ones right, at 96 and 284 on a 390 screen", () => {
+  const steps = [2, 3, 4, 5, 6].map((number, i) => item(i < 2 ? "done" : i === 2 ? "next" : "todo", { number }));
+  // a 342 wide path centred on a 390 wide screen (24 dp gutters)
+  const { points } = pathPoints(steps, false, 342, false, true, { frame: 390 });
+  assert.deepEqual(points.map((p) => Math.round(p.x + 24)), [284, 96, 284, 96, 284]);
+  // scaled on a wider screen
+  const wide = pathPoints(steps, false, 732, false, true, { frame: 780 });
+  assert.deepEqual(wide.points.slice(0, 2).map((p) => Math.round(p.x + 24)), [568, 192]);
+});
+
+test("the zigzag rows are about 125 apart, a little more around the current chapter", () => {
+  const steps = [2, 3, 4, 5, 6].map((number, i) => item(i < 2 ? "done" : i === 2 ? "next" : "todo", { number }));
+  const { centers } = layoutPath(steps, false, true, true);
+  const gaps = centers.slice(1).map((c, i) => c - centers[i]);
+  assert.deepEqual(gaps, [ZIG.row, ZIG.row + ZIG.aboveNext, ZIG.row + ZIG.belowNext, ZIG.row]);
+  gaps.forEach((g) => assert.ok(g >= 125 && g <= 150));
+});
+
+test("the zigzag line leaves and enters every chapter straight down, with no kink", () => {
+  const steps = [1, 2, 3, 4].map((number) => item("todo", { number }));
+  const { points } = pathPoints(steps, true, 342, false, false, { frame: 390 });
+  for (let i = 0; i < points.length - 1; i += 1) {
+    const [a, b, c, d] = segment(points, i, "s");
+    assert.equal(b.x, a.x);
+    assert.equal(c.x, d.x);
+    assert.ok(b.y > a.y && c.y < d.y);
+  }
+  assert.ok(pathD(points, 0, points.length - 1, "s").startsWith("M"));
+});
+
+test("the zigzag keeps no room over the current step for a bubble: it sits beside the step", () => {
+  const steps = [item("done", { number: 1 }), item("next", { number: 2 })];
+  assert.deepEqual(layoutPath(steps, true, true, true), layoutPath(steps, false, true, true));
+});
+
+test("pathLength: a straight drop is as long as the drop, and an S curve is longer than its chord", () => {
+  const straight = [{ x: 50, y: 0 }, { x: 50, y: 120 }];
+  assert.ok(Math.abs(pathLength(straight, 0, 1, "s") - 120) < 1e-6);
+  const zig = [{ x: 96, y: 0 }, { x: 284, y: 125 }, { x: 96, y: 250 }];
+  const one = pathLength(zig, 0, 1, "s");
+  assert.ok(one > Math.hypot(188, 125) && one < 188 + 125);
+  assert.ok(Math.abs(pathLength(zig, 0, 2, "s") - 2 * one) < 1e-6, "the two mirrored pieces are the same length");
+  assert.equal(pathLength(zig, 1, 1, "s"), 0);
 });

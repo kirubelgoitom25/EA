@@ -19,7 +19,7 @@ export default function EmberButton({ label, onPress, icon = "arrow-forward", de
       <Ionicons name={icon} size={20} color={tokens.onAccent} />
     </>
   );
-  const base = [styles.ember, { height, borderRadius: height / 2 }, style];
+  const base = [styles.ember, { height, borderRadius: layout.radius }, style];
   if (decorative) return <View style={base}>{body}</View>;
   return (
     <Pressable
@@ -39,7 +39,7 @@ export default function EmberButton({ label, onPress, icon = "arrow-forward", de
 const styles = StyleSheet.create({
   ember: {
     backgroundColor: tokens.accent,
-    borderBottomWidth: 4,
+    borderBottomWidth: 5,
     borderBottomColor: tokens.accentLip,
     flexDirection: "row",
     alignItems: "center",
@@ -47,6 +47,6 @@ const styles = StyleSheet.create({
     gap: space.sm,
     paddingHorizontal: space.xl,
   },
-  pressed: { backgroundColor: tokens.accentPressed, borderBottomWidth: 0, marginTop: 4 },
+  pressed: { backgroundColor: tokens.accentPressed, borderBottomWidth: 0, marginTop: 5 },
   label: { color: tokens.onAccent, letterSpacing: 0.4 },
 });

@@ -4,8 +4,8 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { Ionicons } from "@expo/vector-icons";
 import { haptic } from "../services/feedback";
-import { layout, tokens } from "../theme";
-import { NAV_BAR_HEIGHT, NAV_BAR_MARGIN } from "./ui/Screen";
+import { tokens } from "../theme";
+import { NAV_BAR_HEIGHT } from "./ui/Screen";
 
 // One icon family: outline when idle, filled when you're on it.
 const ICONS = {
@@ -29,7 +29,7 @@ export default function BottomNavBar({ active, onNavigate }) {
   const insets = useSafeAreaInsets();
 
   return (
-    <View style={[styles.wrapper, { bottom: insets.bottom + NAV_BAR_MARGIN }]} accessibilityRole="tablist">
+    <View style={[styles.wrapper, { height: NAV_BAR_HEIGHT + insets.bottom, paddingBottom: insets.bottom }]} accessibilityRole="tablist">
       {TABS.map((tab) => {
         const isActive = active === tab.key;
         const [outline, filled] = ICONS[tab.key];
@@ -49,8 +49,8 @@ export default function BottomNavBar({ active, onNavigate }) {
             <View style={[styles.capsule, isActive && styles.capsuleActive]}>
               <Ionicons
                 name={isActive ? filled : outline}
-                size={24}
-                color={isActive ? tokens.accent : tokens.textSecondary}
+                size={26}
+                color={isActive ? tokens.accentLip : tokens.text}
               />
             </View>
           </Pressable>
@@ -63,17 +63,15 @@ export default function BottomNavBar({ active, onNavigate }) {
 const styles = StyleSheet.create({
   wrapper: {
     position: "absolute",
-    left: layout.gutter,
-    right: layout.gutter,
+    left: 0,
+    right: 0,
+    bottom: 0,
     flexDirection: "row",
     backgroundColor: tokens.surface,
-    borderRadius: NAV_BAR_HEIGHT / 2,
-    paddingHorizontal: 8,
-    shadowColor: tokens.plum,
-    shadowOpacity: 0.14,
-    shadowRadius: 14,
-    shadowOffset: { width: 0, height: 6 },
-    elevation: 8,
+    paddingHorizontal: 16,
+    paddingTop: 6,
+    borderTopWidth: 1,
+    borderTopColor: tokens.divider,
   },
 
   tab: {
@@ -88,9 +86,9 @@ const styles = StyleSheet.create({
   },
 
   capsule: {
-    width: 60,
-    height: 40,
-    borderRadius: 20,
+    width: 72,
+    height: 48,
+    borderRadius: 16,
     alignItems: "center",
     justifyContent: "center",
   },

@@ -1,16 +1,13 @@
 import React, { useEffect, useMemo } from "react";
 import { Animated, Pressable, StyleSheet, View, useWindowDimensions } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { LinearGradient as Fade } from "expo-linear-gradient";
-import Svg, { Defs, LinearGradient, Path, Stop } from "react-native-svg";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { layout, space, stone, tokens } from "../theme";
+import { fonts, space, stone, tokens } from "../theme";
 import BottomNavBar from "./BottomNavBar";
 import { firstOpenChapter, flattenChapters } from "./session/sessionModel";
 import AppText from "./ui/AppText";
 import { Entrance, useCountUp, useFlicker } from "./ui/anim";
-import Button from "./ui/Button";
 import EmptyState from "./ui/EmptyState";
 import { useFoxReact } from "./ui/FoxContext";
 import Screen, { TAB_BAR_HEIGHT } from "./ui/Screen";
@@ -19,9 +16,9 @@ import Route from "./ui/Route";
 // How many chapters of the trail Home shows around where you are.
 const WINDOW = 5;
 
-// Home is one thing: your trail through the course you're on, with the fox
-// where you are and one button to keep going. Streak, XP and rank sit small
-// at the top.
+// Home is one thing: your trail through the course you're on, icon-only keys
+// with the fox on top of the one you're at (tap it to keep going). Streak, XP
+// and rank sit small at the top.
 export default function HomeScreen({
   ranking = [],
   user,
@@ -83,45 +80,46 @@ export default function HomeScreen({
     <View style={styles.root}>
       <Screen
         withTabBar
-        grid
         background={stone.bg}
         contentStyle={[
           styles.content,
           showTrail && {
-            paddingBottom: TAB_BAR_HEIGHT + insets.bottom + (finished ? 0 : layout.buttonHeight) + space.xxl,
+            paddingBottom: TAB_BAR_HEIGHT + insets.bottom + space.xxl,
           },
         ]}
       >
         <Entrance distance={-14} style={styles.top}>
-          <View style={styles.stats}>
-            <Stat accessibilityLabel={`${streak}-day streak`}>
-              <TailFlame style={flame} />
-              <AppText variant="title" style={styles.statValue}>{streakShown}</AppText>
-            </Stat>
-            <Stat accessibilityLabel={`${xp} XP`}>
-              <Ionicons name="star" size={16} color={tokens.accent} />
-              <AppText variant="title" style={styles.statValue}>{xpShown}</AppText>
-            </Stat>
-            <Stat onPress={onRanking} accessibilityLabel={`Rank ${rank} in your class. Open leaderboard`}>
-              <Ionicons name="trophy" size={16} color={tokens.accent} />
-              <AppText variant="title" style={styles.statValue}>{rankShown}</AppText>
-            </Stat>
-          </View>
-
-          <View style={styles.topRight}>
           {showTrail ? (
             <Pressable
               onPress={() => (courses.length > 1 ? onCourses() : onSelectCourse(trailCourse))}
               accessibilityRole="button"
               accessibilityLabel={`${trailCourse.title}. ${courses.length > 1 ? "Switch course" : "Open course"}`}
-              style={({ pressed }) => [styles.coursePill, pressed && styles.pressed]}
+              style={({ pressed }) => [styles.coursePill, pressed && styles.coursePillPressed]}
             >
               <AppText variant="label" numberOfLines={1} style={styles.courseName}>
                 {trailCourse.title}
               </AppText>
-              <Ionicons name="chevron-down" size={14} color={tokens.textSecondary} />
+              <Ionicons name="chevron-down" size={18} color={tokens.text} />
             </Pressable>
-          ) : null}
+          ) : (
+            <View />
+          )}
+
+          <View style={styles.topRight}>
+            <View style={styles.stats}>
+              <Stat accessibilityLabel={`${streak}-day streak`}>
+                <Animated.View style={flame}><Ionicons name="flame" size={20} color={tokens.flame} /></Animated.View>
+                <AppText variant="title" style={styles.statValue}>{streakShown}</AppText>
+              </Stat>
+              <Stat accessibilityLabel={`${xp} XP`}>
+                <Ionicons name="flash" size={20} color={tokens.accentLip} />
+                <AppText variant="title" style={styles.statValue}>{xpShown}</AppText>
+              </Stat>
+              <Stat onPress={onRanking} accessibilityLabel={`Rank ${rank} in your class. Open leaderboard`}>
+                <Ionicons name="trophy-outline" size={20} color={tokens.text} />
+                <AppText variant="title" style={styles.statValue}>{rankShown}</AppText>
+              </Stat>
+            </View>
             {availableCount > 0 ? (
               <Pressable
                 onPress={onExplore}
@@ -139,6 +137,9 @@ export default function HomeScreen({
         {showTrail ? (
           <Route
             cta={false}
+            words={false}
+            foxPlace="above"
+            zigzag
             foxKey={`course-${trailCourse.id}`}
             style={styles.trail}
             items={visible.map((chapter, i) => {
@@ -184,24 +185,6 @@ export default function HomeScreen({
         )}
       </Screen>
 
-      {showTrail && !finished ? (
-        <View style={[styles.cta, { bottom: 0, paddingBottom: TAB_BAR_HEIGHT + insets.bottom + space.md }]} pointerEvents="box-none">
-          <Fade
-            colors={["rgba(250,251,251,0)", tokens.bg]}
-            locations={[0, 0.55]}
-            style={StyleSheet.absoluteFill}
-            pointerEvents="none"
-          />
-          <Entrance delay={500} distance={40}>
-            <Button
-              label="Continue"
-              accessibilityLabel={`Continue ${resumeChapter.title}`}
-              onPress={() => onContinueChapter(resumeCourse, resumeChapter)}
-            />
-          </Entrance>
-        </View>
-      ) : null}
-
       <BottomNavBar
         active="home"
         onNavigate={(tab) => {
@@ -237,23 +220,6 @@ function Stat({ children, onPress, accessibilityLabel }) {
   );
 }
 
-// The streak flame, filled with the Tail.
-function TailFlame({ style }) {
-  return (
-    <Animated.View style={style}>
-    <Svg width={18} height={18} viewBox="0 0 24 24">
-      <Defs>
-        <LinearGradient id="flame" x1="0" y1="1" x2="0" y2="0">
-          <Stop offset="0" stopColor={tokens.tailEnd} />
-          <Stop offset="1" stopColor={tokens.tailStart} />
-        </LinearGradient>
-      </Defs>
-      <Path d="M12 2c1 4 5 6 5 11a5 5 0 0 1-10 0c0-2 1-3.5 2-4.5 0 2 1 3 2 3 0-4-1-6 1-9.5z" fill="url(#flame)" />
-    </Svg>
-    </Animated.View>
-  );
-}
-
 const styles = StyleSheet.create({
   root: {
     flex: 1,
@@ -277,7 +243,7 @@ const styles = StyleSheet.create({
   stats: {
     flexDirection: "row",
     alignItems: "center",
-    gap: space.lg,
+    gap: space.md,
   },
 
   stat: {
@@ -287,12 +253,11 @@ const styles = StyleSheet.create({
   },
 
   statValue: {
-    fontSize: 17,
-    lineHeight: 22,
+    fontSize: 16,
+    lineHeight: 20,
   },
 
   topRight: {
-    flexShrink: 1,
     flexDirection: "row",
     alignItems: "center",
     gap: space.sm,
@@ -301,38 +266,41 @@ const styles = StyleSheet.create({
   add: {
     width: 36,
     height: 36,
-    borderRadius: 18,
+    borderRadius: 12,
     backgroundColor: tokens.accent,
+    borderBottomWidth: 3,
+    borderBottomColor: tokens.accentLip,
     alignItems: "center",
     justifyContent: "center",
   },
 
+  // the course picker: a white key with a soft lip
   coursePill: {
     flexShrink: 1,
     flexDirection: "row",
     alignItems: "center",
     gap: space.xs,
-    height: 36,
-    paddingHorizontal: space.md,
-    borderRadius: 18,
+    height: 44,
+    paddingLeft: space.md,
+    paddingRight: space.sm,
+    borderRadius: 14,
     backgroundColor: tokens.surface,
-    borderWidth: 1,
+    borderWidth: 2,
+    borderBottomWidth: 4,
     borderColor: tokens.divider,
+  },
+
+  coursePillPressed: {
+    borderBottomWidth: 2,
+    marginTop: 2,
   },
 
   courseName: {
     flexShrink: 1,
+    fontFamily: fonts.display,
   },
 
   trail: {
     marginTop: space.xl,
-  },
-
-  cta: {
-    position: "absolute",
-    left: 0,
-    right: 0,
-    paddingTop: space.xxl,
-    paddingHorizontal: layout.gutter,
   },
 });

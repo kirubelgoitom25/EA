@@ -47,6 +47,7 @@ export default function Fox({
   decorative = false,
   mood: fixedMood,
   reactive = false,
+  fidget = true, // off: no idle head-tilts and sniffs (on a path, where the current step's routine moves)
   tappable = false,
   caption = false,
   bubble = "center",
@@ -62,7 +63,7 @@ export default function Fox({
   const shown = pose === "head" ? "head" : WAVING.has(mood) ? "waving" : pose;
   const height = shown === "head" ? Math.round(size * HEAD_RATIO) : size;
 
-  const idle = useIdleMotion(400, reactive && mood === "idle");
+  const idle = useIdleMotion(400, fidget && reactive && mood === "idle");
   const moodStyle = useMoodMotion(mood, nonce, alive, mirror);
 
   // The few words, for a moment.

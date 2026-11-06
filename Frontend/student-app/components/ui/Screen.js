@@ -7,8 +7,8 @@ import DotGrid from "./DotGrid";
 
 // Height of <BottomNavBar> above the safe-area inset. Screens with a tab
 // bar add this to their bottom padding so content scrolls clear of it.
-export const NAV_BAR_HEIGHT = 56;
-export const NAV_BAR_MARGIN = 12; // gap between the floating bar and the screen bottom
+export const NAV_BAR_HEIGHT = 64;
+export const NAV_BAR_MARGIN = 0; // the bar sits flush with the screen bottom
 export const TAB_BAR_HEIGHT = NAV_BAR_HEIGHT + NAV_BAR_MARGIN;
 
 // Every EA screen sits in this: the brand background, safe-area spacing,

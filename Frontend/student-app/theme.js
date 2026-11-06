@@ -12,32 +12,33 @@ import React, { createContext, useContext } from "react";
 //   Continue card).
 // - Fern / clay are for answer feedback only.
 export const tokens = {
-  bg: "#FAFBFB",
+  bg: "#FFFFFF",
   surface: "#FFFFFF",
 
-  text: "#22152B", // plum ink
-  textSecondary: "#6B6170",
-  textTertiary: "#857A8C", // placeholders and disabled states only
+  text: "#27372F", // deep green-grey ink
+  textSecondary: "#5F6F66",
+  textTertiary: "#7A8680", // placeholders and disabled states only
 
-  divider: "#ECEAEE",
-  neutralTint: "#F1EFF3", // empty stones, tracks
-  mist: "#F3EEF6", // notes and explanations
+  divider: "#E5E5E5",
+  neutralTint: "#EFEFEF", // empty stones, tracks
+  mist: "#EEF5F1", // notes and explanations
 
-  accent: "#F49200", // ember
-  accentPressed: "#E08600",
-  accentText: "#B45309", // small orange text and links
-  accentTint: "#FFF1DE",
-  onAccent: "#22152B",
+  accent: "#5E9C7D", // sage
+  accentPressed: "#4F8B6E",
+  accentText: "#3B6E54", // small green text and links
+  accentTint: "#E4F1E9",
+  onAccent: "#FFFFFF",
   onAccentStrong: "#FFFFFF", // primary button label
-  accentLip: "#C96A00", // pressed-in edge of solid orange
-  buttonFace: "#EFE7DA", // primary button: warm sand
-  buttonFacePressed: "#E6DCCB",
-  buttonLip: "#DCCFBB", // primary button: its raised bottom edge
-  buttonInk: "#2A2230", // primary button label
+  accentLip: "#467F62", // the raised bottom edge of solid sage
+  flame: "#F2720C", // the streak flame stays orange
+  buttonFace: "#E4F1E9", // avatar face: pale sage
+  buttonFacePressed: "#D5E8DD",
+  buttonLip: "#BFD9CB",
+  buttonInk: "#27372F",
 
-  tailStart: "#F49200",
-  tailMid: "#E8687E",
-  tailEnd: "#DE468E",
+  tailStart: "#84B89B",
+  tailMid: "#5E9C7D",
+  tailEnd: "#467F62",
 
   plum: "#2B1A38",
   plumHill: "#4E3060",
@@ -56,26 +57,26 @@ export const tokens = {
 // The path screens (Home, a course, a chapter) are neutral: warm off-white ground, stone rocks, and
 // colour only where it means something: moss for what is done, ember for where you are.
 export const stone = {
-  bg: "#F4F2EE",
-  dot: "#E4E0D7", // the dot grid
-  line: "#CFCABF", // the dotted path ahead
-  moss: "#6F9C7F", // done
-  mossEdge: "#4F7A5E",
-  mossLight: "#8DB79B",
-  rock: "#DCD8CF", // a rock still ahead
-  rockEdge: "#BFBAAF",
-  rockLight: "#EDEAE3",
-  rockInk: "#8C877D",
-  // domes (a part's end, and the den) are slate blue, so they are never mistaken for rocks
-  den: "#6F86A6",
-  denEdge: "#51688A",
-  denLight: "#93A8C4",
-  denOff: "#C9D1DC",
-  denOffEdge: "#AAB4C2",
-  denOffLight: "#E3E8EF",
-  denOffDoor: "#5E6A7C",
-  here: "#F1EEE8", // the rock you are on
-  hereEdge: "#CFCABF",
+  bg: "#FFFFFF",
+  dot: "#F0F0F0", // (the dot grid is no longer drawn)
+  line: "#DCDCDC", // the dotted path ahead
+  moss: "#84B89B", // the dotted path you have travelled
+  mossEdge: "#84B89B",
+  mossLight: "#A9D3BC",
+  rock: "#EFEFEF", // a tile still ahead
+  rockEdge: "#DCDCDC",
+  rockLight: "#EFEFEF",
+  rockInk: "#8A8A8A",
+  // domes (a part's end, and the den)
+  den: "#5E9C7D",
+  denEdge: "#467F62",
+  denLight: "#A9D3BC",
+  denOff: "#E4E4E4",
+  denOffEdge: "#CFCFCF",
+  denOffLight: "#F3F3F3",
+  denOffDoor: "#9A9A9A",
+  here: "#5E9C7D", // the tile you are on
+  hereEdge: "#467F62",
 };
 
 // The Tail as gradient stops (for expo-linear-gradient / SVG).
@@ -96,9 +97,9 @@ export function tailAt(t) {
 // Custom fonts carry their weight in the family name, so never set
 // fontWeight next to these (Android would fall back to the system font).
 export const fonts = {
-  regular: "Inter_400Regular",
-  semibold: "Inter_600SemiBold",
-  display: "BricolageGrotesque_700Bold",
+  regular: "PlusJakartaSans_500Medium",
+  semibold: "PlusJakartaSans_700Bold",
+  display: "PlusJakartaSans_800ExtraBold",
 };
 
 export const type = {
@@ -128,9 +129,9 @@ export const space = {
 export const layout = {
   gutter: space.xl,
   buttonHeight: 56,
-  radius: 18, // buttons
+  radius: 16, // buttons
   tileRadius: 24, // answer tiles, cards
-  stoneRadius: 24,
+  stoneRadius: 26,
 };
 
 // Durations in ms. Motion is for answer feedback and progress only.
