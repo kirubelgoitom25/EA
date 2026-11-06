@@ -12,6 +12,7 @@ import {
   Alert,
   AppState,
   BackHandler,
+  Linking,
 } from "react-native";
 import {
   useFonts,
@@ -26,6 +27,9 @@ import ProfileScreen from "./components/ProfileScreen";
 import CoursesScreen from "./components/CoursesScreen";
 import ExploreScreen from "./components/ExploreScreen";
 import CourseScreen from "./components/CourseScreen";
+import LockedCourseScreen from "./components/LockedCourseScreen";
+import PurchaseScreen from "./components/PurchaseScreen";
+import PaymentRequestsScreen from "./components/PaymentRequestsScreen";
 import RankingScreen from "./components/RankingScreen";
 import ChapterPathScreen from "./components/ChapterPathScreen";
 import ActivityScreen from "./components/ActivityScreen";
@@ -33,11 +37,19 @@ import JourneyMoment from "./components/JourneyMoment";
 import StageSession from "./components/session/StageSession";
 import { flattenChapters, nextChapter } from "./components/session/sessionModel";
 import { loadMyCourseIds, saveMyCourseIds } from "./services/myCourses";
+import { isLocked, withPurchased } from "./services/access";
+import { isAuthCallback } from "./services/authModel";
+import { finishGoogleSignIn, googleSignInInProgress, signInWithGoogle } from "./services/googleAuth";
 
 import { supabase } from "./lib/supabase";
 import {
   loginUser,
   logoutUser,
+  signUpUser,
+  verifySignUpCode,
+  resendSignUpCode,
+  sendPasswordResetCode,
+  resetPassword,
   restoreSession,
   fetchStudent,
   fetchCourses,
@@ -150,6 +162,23 @@ export default function App() {
     return () => {
       cancelled = true;
     };
+  }, []);
+
+  // Android can close the app while the Google sheet is open. It then comes back through this
+  // link instead of the sheet's own answer, so the sign-in is finished here.
+  useEffect(() => {
+    const handle = (url) => {
+      if (!isAuthCallback(url) || googleSignInInProgress()) return;
+      finishGoogleSignIn(url)
+        .then((signedIn) => {
+          setUser(signedIn);
+          setStack([HOME]);
+        })
+        .catch((error) => Alert.alert("Couldn't sign in", error.message));
+    };
+    Linking.getInitialURL().then(handle).catch(() => {});
+    const subscription = Linking.addEventListener("url", ({ url }) => handle(url));
+    return () => subscription.remove();
   }, []);
 
   // Any sign-out (logout button, or the server rejecting an expired
@@ -351,13 +380,72 @@ export default function App() {
     onProfile: () => goTo("profile"),
   };
 
+  const enterApp = (signedIn) => {
+    setUser(signedIn);
+    setStack([HOME]);
+  };
+
   const handleLogin = async ({ email, password }) => {
     try {
-      const loggedInUser = await loginUser(email.trim(), password);
-      setUser(loggedInUser);
-      setStack([HOME]);
+      enterApp(await loginUser(email.trim(), password));
     } catch (error) {
+      if (error.needsConfirmation) return "verify";
       Alert.alert("Login failed", error.message);
+    }
+    return null;
+  };
+
+  const handleGoogle = async () => {
+    try {
+      const signedIn = await signInWithGoogle();
+      if (signedIn) enterApp(signedIn); // null: the student closed the sheet
+    } catch (error) {
+      Alert.alert("Couldn't sign in", error.message);
+    }
+  };
+
+  const handleSignUp = async (details) => {
+    try {
+      const { outcome, user: signedIn } = await signUpUser(details);
+      if (signedIn) enterApp(signedIn);
+      return outcome;
+    } catch (error) {
+      Alert.alert("Couldn't create your account", error.message);
+      return null;
+    }
+  };
+
+  const handleVerify = async (email, code) => {
+    try {
+      enterApp(await verifySignUpCode(email, code));
+    } catch (error) {
+      Alert.alert("Couldn't confirm your email", error.message);
+    }
+  };
+
+  const handleResend = async (email) => {
+    try {
+      await resendSignUpCode(email);
+    } catch (error) {
+      Alert.alert("Couldn't send the code", error.message);
+    }
+  };
+
+  const handleForgot = async (email) => {
+    try {
+      await sendPasswordResetCode(email);
+      return true;
+    } catch (error) {
+      Alert.alert("Couldn't send the code", error.message);
+      return false;
+    }
+  };
+
+  const handleReset = async ({ email, code, password }) => {
+    try {
+      enterApp(await resetPassword(email, code, password));
+    } catch (error) {
+      Alert.alert("Couldn't change your password", error.message);
     }
   };
 
@@ -434,6 +522,24 @@ export default function App() {
     setMyCourseIds(ids);
     saveMyCourseIds(user.id, ids);
   };
+
+  // A course the student paid for belongs in "Your courses" without them adding it.
+  useEffect(() => {
+    if (!user || myCourseIds === null) return;
+    const merged = withPurchased(myCourseIds, courses);
+    if (merged !== myCourseIds) setMine(merged);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user, courses, myCourseIds]);
+
+  // Access can end while a chapter is open. The server already refuses it, so this only moves the
+  // student somewhere useful: the course's own page, with a way to renew. Answers stay on the phone.
+  useEffect(() => {
+    if (!selectedCourse || !isLocked(selectedCourse)) return;
+    if (!["intro", "path", "stage", "activity"].includes(screen)) return;
+    const at = stack.indexOf("course");
+    setStack(at >= 0 ? stack.slice(0, at + 1) : [...stack.slice(0, -1), "course"]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedCourse, screen]);
   const isMine = (courseId) => (myCourseIds ?? []).includes(courseId);
   const addCourse = (courseId) => {
     if (!isMine(courseId)) setMine([...(myCourseIds ?? []), courseId]);
@@ -447,7 +553,7 @@ export default function App() {
   const openCourse = async (course) => {
     let intro = false;
     try {
-      intro = isFreshCourse(course) && !(await hasSeen(user.id, "intro", course.id));
+      intro = !isLocked(course) && isFreshCourse(course) && !(await hasSeen(user.id, "intro", course.id));
     } catch (error) {
       // keep the path
     }
@@ -500,6 +606,12 @@ export default function App() {
   // path instead, so those steps are not skipped. If its activities can't be loaded, behave as
   // before and go straight to the stage.
   const continueChapter = async (course, lesson) => {
+    // A locked course opens on its own page, with the way to get access.
+    if (isLocked(course)) {
+      setSelectedCourse(course);
+      showScreen([...stack, "course"]);
+      return;
+    }
     // A course not begun yet starts with its introduction.
     try {
       if (isFreshCourse(course) && !(await hasSeen(user.id, "intro", course.id))) {
@@ -525,6 +637,17 @@ export default function App() {
     showScreen([...stack, "course", "path", ...(straightToStage ? ["stage"] : [])]);
   };
 
+  // "Submit again" from the list of requests. A course that has since gone isn't on sale.
+  const buyAgain = (courseId) => {
+    const course = courses.find((candidate) => candidate.id === courseId);
+    if (!course || course.purchasable === false) {
+      Alert.alert("Not available", "This course isn't available to buy right now.");
+      return;
+    }
+    setSelectedCourse(course);
+    openScreen("purchase");
+  };
+
   // The selected chapter as it is in the latest course data (so "done"
   // updates after a submit).
   const currentLesson =
@@ -532,7 +655,7 @@ export default function App() {
     selectedLesson;
 
   // Shown on a back link: the screen you'd return to.
-  const BACK_LABELS = { home: "Home", courses: "Courses", explore: "Explore" };
+  const BACK_LABELS = { home: "Home", courses: "Courses", explore: "Explore", profile: "Profile", payments: "Requests" };
   const previousScreen = stack[stack.length - 2];
   const backLabel =
     previousScreen === "course" ? selectedCourse?.title : BACK_LABELS[previousScreen];
@@ -550,7 +673,17 @@ export default function App() {
   }
 
   if (!user) {
-    return <LoginScreen onLogin={handleLogin} />;
+    return (
+      <LoginScreen
+        onLogin={handleLogin}
+        onGoogle={handleGoogle}
+        onSignUp={handleSignUp}
+        onVerify={handleVerify}
+        onResend={handleResend}
+        onForgot={handleForgot}
+        onReset={handleReset}
+      />
+    );
   }
 
   if (loadingData || !student) {
@@ -584,6 +717,7 @@ export default function App() {
         ranking={rankingEntries}
         onBack={goBack}
         onLogout={handleLogout}
+        onRequests={() => openScreen("payments")}
         {...navProps}
       />
     );
@@ -615,6 +749,34 @@ export default function App() {
     );
   }
 
+  if (screen === "purchase" && selectedCourse) {
+    return (
+      <PurchaseScreen
+        course={selectedCourse}
+        backLabel={backLabel}
+        onBack={goBack}
+        onSent={refreshProgress}
+        onRequests={() => showScreen([...stack.slice(0, -1), "payments"])}
+      />
+    );
+  }
+
+  if (screen === "payments") {
+    return <PaymentRequestsScreen backLabel={backLabel} onBack={goBack} onSubmitAgain={buyAgain} />;
+  }
+
+  if (screen === "course" && isLocked(selectedCourse)) {
+    return (
+      <LockedCourseScreen
+        course={selectedCourse}
+        backLabel={backLabel}
+        onBack={goBack}
+        onBuy={() => openScreen("purchase")}
+        onRequests={() => openScreen("payments")}
+      />
+    );
+  }
+
   if (screen === "course") {
     return (
       <CourseScreen
@@ -622,6 +784,7 @@ export default function App() {
         course={selectedCourse}
         isMine={isMine(selectedCourse.id)}
         onToggleMine={() => toggleCourse(selectedCourse.id)}
+        onRenew={() => openScreen("purchase")}
         backLabel={backLabel}
         onSelectLesson={openLesson}
         onBack={goBack}

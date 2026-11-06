@@ -4,6 +4,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { mascotVariant } from "../config";
+import { accessLine, canRenew } from "../services/access";
 import { loadProgressSummary } from "../services/chapterProgress";
 import { hasSeen, markSeen } from "../services/journey";
 import { chapterWord, isCourseComplete } from "../services/journeyModel";
@@ -35,6 +36,7 @@ export default function CourseScreen({
   course,
   isMine,
   onToggleMine,
+  onRenew,
   backLabel,
   onSelectLesson,
   onBack,
@@ -184,6 +186,14 @@ export default function CourseScreen({
                 accessibilityLabel={`${doneCount} of ${total} ${chapterWord(total)} done`}
               />
             ) : null}
+            {canRenew(course) ? (
+              <Pressable onPress={onRenew} accessibilityRole="button" hitSlop={space.sm}>
+                <AppText variant="caption" tone="secondary" style={styles.accessLine}>
+                  {`${accessLine(course)} · `}
+                  <AppText variant="caption" style={styles.renew}>Renew</AppText>
+                </AppText>
+              </Pressable>
+            ) : null}
           </View>
         </View>
 
@@ -281,6 +291,8 @@ export default function CourseScreen({
 }
 
 const styles = StyleSheet.create({
+  accessLine: { marginTop: space.xs },
+  renew: { color: tokens.accentText },
   root: {
     flex: 1,
     backgroundColor: stone.bg,

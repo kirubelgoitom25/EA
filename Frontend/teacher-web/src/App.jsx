@@ -18,6 +18,8 @@ import PracticeEditor from "./pages/PracticeEditor.jsx";
 import StudioDashboard from "./pages/StudioDashboard.jsx";
 import CourseEditor from "./pages/CourseEditor.jsx";
 import LessonActivities from "./pages/LessonActivities.jsx";
+import Payments from "./pages/Payments.jsx";
+import People from "./pages/People.jsx";
 import "./App.css";
 import "./studio.css";
 
@@ -62,6 +64,8 @@ const router = createBrowserRouter([
                 path: "/studio/courses/:courseId/lessons/:lessonId",
                 element: <LessonActivities />,
               },
+              { path: "/payments", element: <Payments /> },
+              { path: "/people", element: <People /> },
               { path: "/content", element: <Content /> },
               { path: "/content/lessons/:lessonId/quiz", element: <QuizEditor /> },
               {

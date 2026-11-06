@@ -1,12 +1,16 @@
 import { supabase } from "../lib/supabase";
 import { API_BASE_URL } from "../config";
+import { signUpOutcome } from "./authModel";
 
 
 
 // The backend sends this exact text when an account has been turned off.
 const ACCOUNT_OFF = "This account is turned off.";
-const ACCOUNT_OFF_TEXT =
+export const ACCOUNT_OFF_TEXT =
   "This account has been turned off. Please contact your teacher.";
+// The free server can take a while to wake up, and photos go over slow connections.
+const UPLOAD_TIMEOUT_MS = 120000;
+
 // ---- Plumbing ------------------------------------------------------
 
 class ApiError extends Error {
@@ -40,30 +44,62 @@ async function request(path, options = {}) {
     );
   }
 
-  if (response.status === 401) {
+  const body = await response.json().catch(() => null);
+  return readResult(response.status, body);
+}
+
+// What every call does with the server's answer.
+async function readResult(status, body) {
+  if (status === 401) {
     await supabase.auth.signOut();
     throw new ApiError("Your session expired. Please log in again.", 401);
   }
 
-  const body = await response.json().catch(() => null);
-
-    // Turned-off account: sign out and say why. The accountOff flag lets the
+  // Turned-off account: sign out and say why. The accountOff flag lets the
   // screens show one clear message.
-  if (response.status === 403 && body?.detail === ACCOUNT_OFF) {
+  if (status === 403 && body?.detail === ACCOUNT_OFF) {
     await supabase.auth.signOut();
     const error = new ApiError(ACCOUNT_OFF_TEXT, 403);
     error.accountOff = true;
     throw error;
   }
 
-  if (!response.ok) {
-    throw new ApiError(
-      body?.detail || "Something went wrong.",
-      response.status,
-    );
+  if (status < 200 || status >= 300) {
+    throw new ApiError(body?.detail || "Something went wrong.", status);
   }
 
   return body;
+}
+
+// Sends a local file. Not fetch: Expo's fetch refuses React Native's { uri } file parts, and
+// XMLHttpRequest streams the file from disk without loading it into memory.
+async function uploadFile(path, form) {
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+
+  const { status, body } = await new Promise((resolve, reject) => {
+    const offline = () =>
+      reject(new ApiError("Can't reach the server. Check your connection and try again.", 0));
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", `${API_BASE_URL}${path}`);
+    if (session) xhr.setRequestHeader("Authorization", `Bearer ${session.access_token}`);
+    xhr.timeout = UPLOAD_TIMEOUT_MS;
+    xhr.onerror = offline;
+    xhr.ontimeout = offline;
+    xhr.onload = () => {
+      let parsed = null;
+      try {
+        parsed = JSON.parse(xhr.responseText);
+      } catch (error) {
+        // no JSON body
+      }
+      resolve({ status: xhr.status, body: parsed });
+    };
+    xhr.send(form);
+  });
+
+  return readResult(status, body);
 }
 
 const lessonPath = (lessonId) => `/lessons/${encodeURIComponent(lessonId)}`;
@@ -78,6 +114,18 @@ function mapCourse(course) {
     progress: course.progress,
     totalLessons: course.total_lessons,
     completedLessons: course.completed_lessons,
+    price: Number(course.price ?? 0),
+    currency: course.currency ?? "ETB",
+    accessDays: course.access_days ?? null,
+    paymentInstructions: course.payment_instructions ?? "",
+    purchasable: course.purchasable ?? true,
+    access: course.access
+      ? {
+          state: course.access.state,
+          expiresAt: course.access.expires_at,
+          pendingRequests: course.access.pending_requests ?? 0,
+        }
+      : null,
     modules: course.modules.map((module) => ({
       id: module.id,
       title: module.title,
@@ -94,7 +142,7 @@ function mapCourse(course) {
 
 // ---- Auth ----------------------------------------------------------
 
-async function loadStudentUser() {
+export async function loadStudentUser() {
   const me = await request("/auth/me");
 
   if (me.role !== "student") {
@@ -124,9 +172,64 @@ export async function loginUser(email, password) {
     if (error.code === "user_banned" || /banned/i.test(error.message || "")) {
       throw new Error(ACCOUNT_OFF_TEXT);
     }
+    if (error.code === "email_not_confirmed") {
+      const unconfirmed = new Error("Confirm your email first.");
+      unconfirmed.needsConfirmation = true;
+      throw unconfirmed;
+    }
     throw new Error("Incorrect email or password.");
   }
 
+  return loadStudentUser();
+}
+
+function authError(error) {
+  if (error.name === "AuthRetryableFetchError") {
+    return new Error("Can't reach the server. Check your connection and try again.");
+  }
+  if (error.code === "over_email_send_rate_limit") {
+    return new Error("Too many emails sent. Please wait a minute and try again.");
+  }
+  if (error.code === "signup_disabled") {
+    return new Error("New accounts aren't open yet. Please try again soon.");
+  }
+  return new Error(error.message || "Something went wrong. Please try again.");
+}
+
+// Returns "signedIn" (with the user), "verify" (a code was emailed) or "exists". Every new account
+// is a student: the database decides that, and nothing sent here can change it.
+export async function signUpUser({ name, email, password }) {
+  const { data, error } = await supabase.auth.signUp({
+    email,
+    password,
+    options: { data: { name: name.trim() } },
+  });
+  if (error) throw authError(error);
+  const outcome = signUpOutcome(data);
+  return { outcome, user: outcome === "signedIn" ? await loadStudentUser() : null };
+}
+
+export async function verifySignUpCode(email, code) {
+  const { error } = await supabase.auth.verifyOtp({ email, token: code.trim(), type: "signup" });
+  if (error) throw new Error("That code didn't work. Check it, or send a new one.");
+  return loadStudentUser();
+}
+
+export async function resendSignUpCode(email) {
+  const { error } = await supabase.auth.resend({ type: "signup", email });
+  if (error) throw authError(error);
+}
+
+export async function sendPasswordResetCode(email) {
+  const { error } = await supabase.auth.resetPasswordForEmail(email);
+  if (error) throw authError(error);
+}
+
+export async function resetPassword(email, code, password) {
+  const { error } = await supabase.auth.verifyOtp({ email, token: code.trim(), type: "recovery" });
+  if (error) throw new Error("That code didn't work. Check it, or send a new one.");
+  const { error: updateError } = await supabase.auth.updateUser({ password });
+  if (updateError) throw authError(updateError);
   return loadStudentUser();
 }
 
@@ -238,6 +341,37 @@ export async function fetchRanking(scope = "class", period = "weekly") {
       responsePosition || numberOrZero(ownEntry?.position) || derivedPosition,
     yourXp: numberOrZero(sessionResult?.your_xp ?? ownEntry?.periodXp),
   };
+}
+
+// ---- Payment requests ------------------------------------------------------
+
+export const MAX_PROOF_BYTES = 5 * 1024 * 1024;
+
+// image: what the photo picker returned. Only the image is sent. The server reads the price,
+// currency and duration from the course itself.
+export async function submitPaymentRequest(courseId, image) {
+  const form = new FormData();
+  form.append("proof", {
+    uri: image.uri,
+    name: image.fileName || "payment.jpg",
+    type: image.mimeType || "image/jpeg",
+  });
+  return uploadFile(`/courses/${encodeURIComponent(courseId)}/payment-requests`, form);
+}
+
+export async function fetchMyPaymentRequests() {
+  const requests = await request("/me/payment-requests");
+  return (requests ?? []).map((row) => ({
+    id: row.id,
+    courseId: row.course_id,
+    courseTitle: row.course_title,
+    status: row.status,
+    amount: Number(row.amount),
+    currency: row.currency,
+    accessDays: row.access_days ?? null,
+    reviewNote: row.review_note,
+    createdAt: row.created_at,
+  }));
 }
 
 // ---- Quiz ----------------------------------------------------------------

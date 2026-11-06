@@ -1,7 +1,8 @@
 """May this teacher edit this lesson, module, course, question or item?
 
 A teacher may edit a course they own. An ownerless (legacy) course can be
-edited by a teacher who teaches at least one class that has it.
+edited by a teacher who teaches at least one class that has it. The main admin
+may edit every course.
 Every check returns the row only when the teacher is allowed, so something
 that does not exist and something that is not theirs both answer 404.
 """
@@ -29,6 +30,9 @@ _TEACHES_COURSE = """
                       join class_teachers ct on ct.class_id = cc.class_id
                       where cc.course_id = cx.id and ct.teacher_id = :teacher_id
                   )
+              )
+              or exists (
+                  select 1 from profiles ap where ap.id = :teacher_id and ap.is_admin
               )
           )
     )

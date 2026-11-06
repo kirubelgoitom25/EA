@@ -5,6 +5,11 @@ class Settings(BaseSettings):
     database_url: str
     supabase_url: str
     access_token_expire_minutes: int = 60
+    # Reaches the private payment-proofs bucket. Bypasses all database security, so it
+    # lives only in the backend's environment, never in Expo or Vite variables.
+    supabase_service_role_key: str = ""
+    # Comma-separated extra browser origins, such as the hosted teacher dashboard.
+    cors_origins: str = ""
 
     model_config = SettingsConfigDict(env_file=".env")
 

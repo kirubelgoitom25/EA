@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { ChevronRight, Plus } from "lucide-react";
+import { useAuth } from "../auth/AuthContext.jsx";
+import { money } from "../lib/payments.js";
 import { studioApi } from "../lib/studioApi.js";
 import { STATUS, MAX_DESCRIPTION_LEN, MAX_TITLE_LEN, friendlyError, timeAgo, trimmed } from "../lib/studio.js";
 import { ErrorNote, LeavePrompt, StatusChip } from "../components/studio/Parts.jsx";
@@ -79,7 +81,7 @@ function CreateCourse({ onCancel, onDirtyChange, allowLeave }) {
   );
 }
 
-export function CourseCard({ course }) {
+export function CourseCard({ course, admin = false }) {
   const meta = STATUS[course.status];
   const when = course.status === "published" ? course.published_at : course.updated_at;
   const label = course.status === "published" ? "Published" : "Updated";
@@ -87,7 +89,8 @@ export function CourseCard({ course }) {
     <>
       <div className="course-tile-top">
         <StatusChip status={course.status} />
-        {!course.owned && <span className="pill pill-cold">Class course</span>}
+        {!course.owned && !admin && <span className="pill pill-cold">Class course</span>}
+        {Number(course.price) > 0 && <span className="pill pill-cold">{money(course.price, course.currency)}</span>}
       </div>
       <h3>{course.title}</h3>
       <p className="course-tile-desc">{course.description}</p>
@@ -116,6 +119,8 @@ export default function StudioDashboard() {
   const [courses, setCourses] = useState(null);
   const [error, setError] = useState("");
   const [tab, setTab] = useState("all");
+  const auth = useAuth();
+  const isAdmin = Boolean(auth?.profile?.is_admin);
   const [creating, setCreating] = useState(false);
   const { dirty, setDirty } = useDirtyMap();
   const onDirtyChange = useCallback((value) => setDirty("create", value), [setDirty]);
@@ -132,8 +137,9 @@ export default function StudioDashboard() {
     };
   }, []);
 
-  const owned = (courses ?? []).filter((c) => c.owned);
-  const classCourses = (courses ?? []).filter((c) => !c.owned);
+  // The main admin manages every course, so they are all listed as their own.
+  const owned = (courses ?? []).filter((c) => c.owned || isAdmin);
+  const classCourses = (courses ?? []).filter((c) => !c.owned && !isAdmin);
   const count = (status) => owned.filter((c) => c.status === status).length;
   const shown = tab === "all" ? owned : owned.filter((c) => c.status === tab);
 
@@ -197,7 +203,7 @@ export default function StudioDashboard() {
           )}
           <div className="studio-grid">
             {shown.map((course) => (
-              <CourseCard key={course.id} course={course} />
+              <CourseCard key={course.id} course={course} admin={isAdmin} />
             ))}
           </div>
 
@@ -210,7 +216,7 @@ export default function StudioDashboard() {
               </p>
               <div className="studio-grid">
                 {classCourses.map((course) => (
-                  <CourseCard key={course.id} course={course} />
+                  <CourseCard key={course.id} course={course} admin={isAdmin} />
                 ))}
               </div>
             </>

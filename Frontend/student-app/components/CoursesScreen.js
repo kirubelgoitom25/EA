@@ -44,7 +44,7 @@ export default function CoursesScreen({
         />
 
         {courses.length === 0 ? (
-          <EmptyState title="No courses yet" message="Your teacher hasn't added courses to your class yet." />
+          <EmptyState title="No courses yet" message="New courses will show up here soon." />
         ) : (
           <>
             {mine.length === 0 ? (

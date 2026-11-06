@@ -49,6 +49,9 @@ def get_current_user(
             algorithms=["ES256"],
             audience="authenticated",
             issuer=settings.supabase_issuer,
+            # A clock a moment behind Supabase's would refuse a brand-new token, and
+            # bounce a student straight back out at their very first login.
+            leeway=10,
         )
     except jwt.PyJWTError:
         raise _invalid_token()
@@ -76,6 +79,7 @@ def get_current_user(
         "is_active": profile.is_active,
         "created_at": profile.created_at,
         "class_id": profile.class_id,
+        "is_admin": profile.is_admin,
     }
 
 
@@ -88,4 +92,12 @@ def require_teacher(user: dict = Depends(get_current_user)) -> dict:
 def require_student(user: dict = Depends(get_current_user)) -> dict:
     if user["role"] != "student":
         raise HTTPException(status_code=403, detail="Students only")
+    return user
+
+
+def require_admin(user: dict = Depends(get_current_user)) -> dict:
+    # The flag comes from the database on this request, never from the client.
+    # Anyone else gets the same 404 as a route that does not exist.
+    if not user["is_admin"]:
+        raise HTTPException(status_code=404, detail="Not found")
     return user

@@ -28,6 +28,9 @@ class Profile(Base):
     role = Column(String, nullable=False)
     is_active = Column(Boolean, nullable=False, default=True)
     class_id = Column(String, ForeignKey("classes.id"), nullable=True)
+    # The main admin stays role "teacher" with this on, so every teacher route and the
+    # dashboard login work unchanged. Set by hand in SQL; no API can write it.
+    is_admin = Column(Boolean, nullable=False, default=False, server_default="false")
     created_at = Column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
@@ -54,6 +57,11 @@ class Course(Base):
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
     published_at = Column(DateTime(timezone=True), nullable=True)
+    # Selling. Price 0 means free. access_days NULL means permanent access.
+    price = Column(Numeric(10, 2), nullable=False, default=0, server_default="0")
+    currency = Column(String, nullable=False, default="ETB", server_default="ETB")
+    access_days = Column(Integer, nullable=True)
+    payment_instructions = Column(Text, nullable=True)
 
     modules = relationship(
         "Module", back_populates="course", order_by="Module.sort_order"
@@ -323,3 +331,65 @@ class ActivityProgress(Base):
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
     source = Column(String, nullable=False, default="manual")
+
+
+class PaymentRequest(Base):
+    """One submission of payment proof: the permanent history.
+
+    amount, currency and access_days are a copy of what the student saw, so a later
+    price change cannot alter the deal. There is no teacher id: the reviewer comes from
+    courses.owner_id, so ownership lives in one place.
+    """
+
+    __tablename__ = "payment_requests"
+    __table_args__ = (
+        CheckConstraint(
+            "status in ('pending','approved','rejected')", name="payment_requests_status_check"
+        ),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    # No cascade: payment history must never vanish with a course or an account.
+    student_id = Column(UUID(as_uuid=True), ForeignKey("profiles.id"), nullable=False)
+    course_id = Column(String, ForeignKey("courses.id"), nullable=False)
+    status = Column(String, nullable=False, default="pending", server_default="pending")
+    amount = Column(Numeric(10, 2), nullable=False)
+    currency = Column(String, nullable=False)
+    access_days = Column(Integer, nullable=True)
+    proof_path = Column(Text, nullable=False)
+    proof_type = Column(String, nullable=False)
+    proof_sha256 = Column(String, nullable=False)
+    reviewed_by = Column(
+        UUID(as_uuid=True), ForeignKey("profiles.id", ondelete="SET NULL"), nullable=True
+    )
+    reviewed_at = Column(DateTime(timezone=True), nullable=True)
+    review_note = Column(Text, nullable=True)
+    created_at = Column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class CourseAccess(Base):
+    """A student's current permission for a paid course. Free courses write no rows.
+
+    expires_at NULL means permanent. Revoking fills revoked_at and keeps the row.
+    """
+
+    __tablename__ = "course_access"
+
+    student_id = Column(
+        UUID(as_uuid=True), ForeignKey("profiles.id", ondelete="CASCADE"), primary_key=True
+    )
+    course_id = Column(String, ForeignKey("courses.id"), primary_key=True)
+    expires_at = Column(DateTime(timezone=True), nullable=True)
+    granted_at = Column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    source = Column(String, nullable=False)
+    granted_by = Column(
+        UUID(as_uuid=True), ForeignKey("profiles.id", ondelete="SET NULL"), nullable=True
+    )
+    revoked_at = Column(DateTime(timezone=True), nullable=True)
+    revoked_by = Column(
+        UUID(as_uuid=True), ForeignKey("profiles.id", ondelete="SET NULL"), nullable=True
+    )

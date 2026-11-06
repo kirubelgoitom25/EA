@@ -2,6 +2,7 @@ import React from "react";
 import { Pressable, StyleSheet, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 
+import { accessLine, isLocked } from "../../services/access";
 import { layout, space, tokens } from "../../theme";
 import AppText from "./AppText";
 import Emblem from "./Emblem";
@@ -12,13 +13,15 @@ export const COURSE_ROW_HEIGHT = 72;
 // and a + to add it. The row opens the course.
 export default function CourseRow({ course, onOpen, onAdd }) {
   const chapters = course.totalLessons ?? 0;
+  const locked = isLocked(course);
+  const note = accessLine(course);
 
   return (
     <View style={styles.row}>
       <Pressable
         onPress={() => onOpen(course)}
         accessibilityRole="button"
-        accessibilityLabel={`${course.title}, ${chapters} chapters`}
+        accessibilityLabel={`${course.title}, ${chapters} chapters${note ? `, ${note}` : ""}`}
         style={({ pressed }) => [styles.main, pressed && styles.pressed]}
       >
         <Emblem course={course} size={48} />
@@ -28,18 +31,20 @@ export default function CourseRow({ course, onOpen, onAdd }) {
           </AppText>
           <AppText variant="caption" tone="secondary">
             {chapters} {chapters === 1 ? "chapter" : "chapters"}
+            {note ? ` · ${note}` : ""}
           </AppText>
         </View>
       </Pressable>
 
+      {/* A paid course has to be bought, so it opens instead of being added. */}
       <Pressable
-        onPress={() => onAdd(course.id)}
+        onPress={() => (locked ? onOpen(course) : onAdd(course.id))}
         hitSlop={space.xs}
         accessibilityRole="button"
-        accessibilityLabel={`Add ${course.title} to your courses`}
+        accessibilityLabel={locked ? `Get access to ${course.title}` : `Add ${course.title} to your courses`}
         style={({ pressed }) => [styles.add, pressed && styles.addPressed]}
       >
-        <Ionicons name="add" size={22} color={tokens.accent} />
+        <Ionicons name={locked ? "lock-closed" : "add"} size={locked ? 18 : 22} color={tokens.accent} />
       </Pressable>
     </View>
   );

@@ -125,7 +125,7 @@ export default function ExploreScreen({
         title={courses.length === 0 ? "No courses yet" : "You've added everything"}
         message={
           courses.length === 0
-            ? "Your teacher hasn't added courses to your class yet."
+            ? "New courses will show up here soon."
             : "New courses will show up here."
         }
         actionLabel={courses.length === 0 ? undefined : "Go to my courses"}

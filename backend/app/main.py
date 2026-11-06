@@ -1,14 +1,16 @@
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
 
-from app.routers import auth, classes, courses, practice, presence, quiz, stats, students, studio, teacher_content
+from app.routers import admin, auth, classes, courses, payments, practice, presence, quiz, stats, students, studio, teacher_content
 from fastapi import Depends, FastAPI, Request
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from app.config import settings
 from app.database import get_db
+from app.payment_rules import MAX_PROOF_BYTES
 
 import os
 
@@ -32,10 +34,56 @@ app.add_middleware(
         "http://127.0.0.1:5174",
         "http://localhost:8081",
         "http://127.0.0.1:8081",
+        *[origin.strip() for origin in settings.cors_origins.split(",") if origin.strip()],
     ],
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# The file limit, plus room for the multipart wrapping.
+MAX_UPLOAD_REQUEST_BYTES = MAX_PROOF_BYTES + 64 * 1024
+TOO_LARGE = "That image is too large (at most 5 MB)"
+
+
+class LimitUploadSize:
+    """A form is read in full before any route runs, so an oversized upload has to be
+    stopped here. Bytes are counted as they arrive, because phones stream uploads with no
+    Content-Length, and a stated length can be a lie anyway."""
+
+    def __init__(self, inner):
+        self.inner = inner
+
+    async def __call__(self, scope, receive, send):
+        is_upload = (
+            scope["type"] == "http"
+            and scope["method"] == "POST"
+            and scope["path"].endswith("/payment-requests")
+        )
+        if not is_upload:
+            await self.inner(scope, receive, send)
+            return
+
+        stated = dict(scope["headers"]).get(b"content-length", b"")
+        if stated.isdigit() and int(stated) > MAX_UPLOAD_REQUEST_BYTES:
+            await JSONResponse(status_code=413, content={"detail": TOO_LARGE})(scope, receive, send)
+            return
+
+        received = 0
+
+        async def counted():
+            nonlocal received
+            message = await receive()
+            if message["type"] == "http.request":
+                received += len(message.get("body", b""))
+                if received > MAX_UPLOAD_REQUEST_BYTES:
+                    raise HTTPException(status_code=413, detail=TOO_LARGE)
+            return message
+
+        await self.inner(scope, counted, send)
+
+
+app.add_middleware(LimitUploadSize)
 
 
 @app.exception_handler(RequestValidationError)
@@ -59,6 +107,9 @@ app.include_router(presence.router)
 app.include_router(teacher_content.router)
 app.include_router(studio.teacher_router)
 app.include_router(studio.student_router)
+app.include_router(payments.student_router)
+app.include_router(payments.teacher_router)
+app.include_router(admin.router)
 
 
 @app.get("/health")

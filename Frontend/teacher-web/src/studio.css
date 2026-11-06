@@ -487,3 +487,133 @@ a.name:hover {
 .classes-card .notice {
   margin: 0 20px 8px;
 }
+
+/* ---- selling courses ------------------------------------------------------------ */
+
+.choice-row {
+  display: flex;
+  gap: 20px;
+  margin-bottom: 12px;
+}
+.choice {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+.field-pair {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: flex-end;
+}
+.field-pair > .field,
+.field-pair > .input {
+  flex: 1 1 180px;
+  min-width: 0;
+}
+.filter-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 12px 0;
+}
+.filter-row .input {
+  flex: 1 1 220px;
+  max-width: 360px;
+}
+.request + .request {
+  border-top: 1px solid var(--line, rgba(0, 0, 0, 0.08));
+}
+.request-head {
+  width: 100%;
+  background: none;
+  border: 0;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.request-detail {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 20px;
+  padding: 8px 12px 20px;
+}
+.person-detail {
+  grid-template-columns: minmax(0, 1fr);
+}
+.request-side {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+.proof-image {
+  display: block;
+  width: 100%;
+  max-height: 520px;
+  object-fit: contain;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.04);
+}
+.facts {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 6px 16px;
+  margin: 0;
+}
+.facts dt {
+  color: var(--muted, #6b7280);
+}
+.facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.nav-count {
+  margin-left: auto;
+  min-width: 20px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: #d9532c;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 20px;
+  text-align: center;
+}
+@media (max-width: 800px) {
+  .shell {
+    grid-template-rows: auto 1fr;
+  }
+  /* Six sections don't fit across a phone, so the row scrolls instead of widening the page. */
+  .sidebar {
+    min-width: 0;
+    max-width: 100%;
+  }
+  .sidebar nav {
+    flex: 1 1 0;
+    min-width: 0;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .nav-item {
+    flex: 0 0 auto;
+    position: relative;
+  }
+  .nav-count {
+    position: absolute;
+    top: -2px;
+    right: -2px;
+    margin: 0;
+    min-width: 18px;
+    padding: 0 4px;
+    font-size: 11px;
+    line-height: 18px;
+  }
+}
+@media (max-width: 760px) {
+  .request-detail {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

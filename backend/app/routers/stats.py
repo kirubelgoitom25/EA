@@ -46,6 +46,45 @@ RANKING_QUERY = """
 """
 
 
+# Only this many students are listed nationally, plus the student asking.
+NATIONAL_TOP = 50
+
+PERIOD_XP = {"weekly": "weekly_xp", "monthly": "monthly_xp", "overall": "xp"}
+
+
+def public_name(name: str) -> str:
+    """"Abebe Kebede" becomes "Abebe K.". Same rule the app shows."""
+    parts = (name or "").split()
+    if not parts:
+        return "Student"
+    if len(parts) == 1:
+        return parts[0]
+    return f"{parts[0]} {parts[-1][0].upper()}."
+
+
+def national_board(rows, my_id: str, period: str) -> list[dict]:
+    """Anyone can register, so this is built to be safe to send to a stranger: first name
+    and last initial, the top of the board plus the student's own row, and no id but their
+    own. Each row carries its real position, so a rank outside the top still reads true."""
+    key = PERIOD_XP[period]
+    ranked = sorted(rows, key=lambda row: (-row[key], row["name"]))
+    board = []
+    for position, row in enumerate(ranked, start=1):
+        mine = str(row["id"]) == my_id
+        if position <= NATIONAL_TOP or mine:
+            board.append(
+                {
+                    "id": str(row["id"]) if mine else "",
+                    "name": public_name(row["name"]),
+                    "xp": row["xp"],
+                    "weekly_xp": row["weekly_xp"],
+                    "monthly_xp": row["monthly_xp"],
+                    "position": position,
+                }
+            )
+    return board
+
+
 @router.get("/me/stats", response_model=MeStatsOut)
 def get_my_stats(current_user: dict = Depends(require_student), db: Session = Depends(get_db)):
     student_id = uuid.UUID(current_user["id"])
@@ -64,6 +103,7 @@ def get_my_stats(current_user: dict = Depends(require_student), db: Session = De
 @router.get("/ranking", response_model=list[RankingEntryOut])
 def get_ranking(
     scope: Literal["class", "national"] = Query("class"),
+    period: Literal["weekly", "monthly", "overall"] = Query("overall"),
     current_user: dict = Depends(require_student),
     db: Session = Depends(get_db),
 ):
@@ -78,6 +118,7 @@ def get_ranking(
         rows = db.execute(text(CLASS_RANKING_QUERY), {"class_id": class_id}).mappings().all()
     else:
         rows = db.execute(text(RANKING_QUERY)).mappings().all()
+        return national_board(rows, current_user["id"], period)
 
     return [
         {

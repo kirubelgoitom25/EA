@@ -305,7 +305,7 @@
     width: auto;
     padding: 8px 10px;
   }
-  .nav-item span {
+  .nav-item span:not(.nav-count) {
     display: none;
   }
   .main {

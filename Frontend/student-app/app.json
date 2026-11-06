@@ -2,6 +2,7 @@
   "expo": {
     "name": "EA",
     "slug": "EA",
+    "scheme": "ea-student",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -25,7 +26,8 @@
       "expo-secure-store",
       "expo-audio",
       "expo-font",
-      "expo-asset"
+      "expo-asset",
+      "expo-web-browser"
     ]
   }
 }

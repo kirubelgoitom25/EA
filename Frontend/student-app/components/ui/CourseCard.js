@@ -2,6 +2,7 @@ import React from "react";
 import { Pressable, StyleSheet, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 
+import { accessLine, isLocked } from "../../services/access";
 import { space, stone, tokens } from "../../theme";
 import AppText from "./AppText";
 import Emblem from "./Emblem";
@@ -16,12 +17,13 @@ export default function CourseCard({ course, onPress }) {
   const done = course.completedLessons ?? 0;
   const progress = total > 0 ? Math.min(1, done / total) : 0;
   const finished = total > 0 && done >= total;
+  const locked = isLocked(course);
 
   return (
     <Pressable
       onPress={() => onPress(course)}
       accessibilityRole="button"
-      accessibilityLabel={`${course.title}, ${finished ? "finished" : `${done} of ${total} chapters`}`}
+      accessibilityLabel={`${course.title}, ${locked ? accessLine(course) : finished ? "finished" : `${done} of ${total} chapters`}`}
       style={({ pressed }) => [styles.row, pressed && styles.pressed]}
     >
       <Emblem course={course} size={44} radius={14} />
@@ -29,7 +31,12 @@ export default function CourseCard({ course, onPress }) {
         {course.title}
       </AppText>
       <View style={styles.progress} importantForAccessibility="no-hide-descendants">
-        {finished ? (
+        {locked ? (
+          <>
+            <AppText variant="caption" tone="secondary">{accessLine(course)}</AppText>
+            <Ionicons name="lock-closed" size={14} color={tokens.textTertiary} />
+          </>
+        ) : finished ? (
           <Ionicons name="checkmark" size={20} color={stone.moss} />
         ) : (
           <>

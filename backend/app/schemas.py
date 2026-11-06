@@ -12,6 +12,7 @@ class UserOut(BaseModel):
     name: str
     email: str
     role: Role
+    is_admin: bool = False
 
 
 class StudentOut(BaseModel):
@@ -37,6 +38,13 @@ class ModuleOut(BaseModel):
     lessons: list[LessonOut]
 
 
+class CourseAccessOut(BaseModel):
+    # free, class, active, expired, revoked or locked
+    state: str
+    expires_at: Optional[datetime] = None
+    pending_requests: int = 0
+
+
 class CourseListItemOut(BaseModel):
     id: str
     title: str
@@ -44,6 +52,13 @@ class CourseListItemOut(BaseModel):
     total_lessons: int
     completed_lessons: int
     progress: int
+    price: Decimal = Decimal("0")
+    currency: str = "ETB"
+    access_days: Optional[int] = None
+    payment_instructions: Optional[str] = None
+    purchasable: bool = True
+    # Students only. Absent for teachers, who are not buying anything.
+    access: Optional[CourseAccessOut] = None
     modules: list[ModuleOut]
 
 
@@ -51,6 +66,12 @@ class CourseDetailOut(BaseModel):
     id: str
     title: str
     description: str
+    price: Decimal = Decimal("0")
+    currency: str = "ETB"
+    access_days: Optional[int] = None
+    payment_instructions: Optional[str] = None
+    purchasable: bool = True
+    access: Optional[CourseAccessOut] = None
     modules: list[ModuleOut]
 
 
@@ -139,6 +160,7 @@ class RankingEntryOut(BaseModel):
     xp: Decimal
     weekly_xp: Decimal
     monthly_xp: Decimal
+    position: Optional[int] = None
 
 class ClassOut(BaseModel):
     id: str

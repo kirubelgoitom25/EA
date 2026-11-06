@@ -4,6 +4,7 @@ Requests refuse unknown fields, so a client cannot slip in an owner_id, a status
 or a sort_order. Reuses StrictIn from content_schemas.
 """
 from datetime import datetime
+from decimal import Decimal
 from typing import Optional
 
 from pydantic import BaseModel, StrictBool, StrictInt
@@ -21,6 +22,10 @@ class CourseCreateIn(StrictIn):
 class CourseUpdateIn(StrictIn):
     title: Optional[str] = None
     description: Optional[str] = None
+    price: Optional[Decimal] = None
+    # Sent as null, this means permanent access. Left out, it is not changed.
+    access_days: Optional[int] = None
+    payment_instructions: Optional[str] = None
 
 
 class ModuleIn(StrictIn):
@@ -105,6 +110,11 @@ class CourseStudioOut(BaseModel):
     status: str
     owned: bool
     editable: bool
+    price: Decimal = Decimal("0")
+    currency: str = "ETB"
+    access_days: Optional[int] = None
+    payment_instructions: Optional[str] = None
+    owner_id: Optional[str] = None
     published_at: Optional[datetime] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None

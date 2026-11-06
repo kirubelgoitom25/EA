@@ -13,7 +13,9 @@ export function rankEntries(entries, period, studentId) {
   return [...(entries ?? [])]
     .map((entry) => ({ ...entry, periodXp: xpForPeriod(entry, period), isYou: entry.id === studentId }))
     .sort((a, b) => b.periodXp - a.periodXp || String(a.name).localeCompare(String(b.name)))
-    .map((entry, index) => ({ ...entry, position: index + 1 }));
+    // The national board is only the top plus the student, so its rows carry their real
+    // position. Counting here would turn a rank of 900 into 51.
+    .map((entry, index) => ({ ...entry, position: entry.position || index + 1 }));
 }
 
 // How a name is shown. Classmates see full names; on the national board

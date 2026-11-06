@@ -12,6 +12,9 @@ import {
   Trash2,
   EyeOff,
 } from "lucide-react";
+import { useAuth } from "../auth/AuthContext.jsx";
+import { OwnerCard, PaidStudentsCard, PricingCard } from "../components/studio/PricingCards.jsx";
+import { money } from "../lib/payments.js";
 import { studioApi } from "../lib/studioApi.js";
 import {
   MAX_DESCRIPTION_LEN,
@@ -245,10 +248,11 @@ function StatsCard({ courseId }) {
 
 // Giving a course to a class puts it on that class's pages, so the teacher sees its students'
 // progress there. These numbers are the class's own, separate from the course-wide ones above.
-function ClassesCard({ courseId, status }) {
+function ClassesCard({ courseId, status, price, currency }) {
   const [rows, setRows] = useState(null);
   const [error, setError] = useState("");
   const [busyId, setBusyId] = useState(null);
+  const [giving, setGiving] = useState(null);
 
   useEffect(() => {
     let live = true;
@@ -305,12 +309,29 @@ function ClassesCard({ courseId, status }) {
             type="button"
             className={row.assigned ? "btn btn-ghost btn-small" : "btn btn-small"}
             disabled={busyId === row.class_id}
-            onClick={() => toggle(row)}
+            onClick={() => (!row.assigned && Number(price) > 0 ? setGiving(row) : toggle(row))}
           >
             {busyId === row.class_id ? "Saving…" : row.assigned ? "Take back" : "Give to class"}
           </button>
         </div>
       ))}
+      <ConfirmDialog
+        open={Boolean(giving)}
+        title={`Give this paid course to ${giving?.name} for free?`}
+        confirmLabel="Give for free"
+        onCancel={() => setGiving(null)}
+        onConfirm={() => {
+          const row = giving;
+          setGiving(null);
+          toggle(row);
+        }}
+      >
+        <p>
+          All {giving?.students} student{giving?.students === 1 ? "" : "s"} in this class, and anyone
+          who joins later, get this course without paying {money(price, currency)}.
+        </p>
+        <p>If you take it back, they lose it unless they bought it. Their progress stays.</p>
+      </ConfirmDialog>
     </section>
   );
 }
@@ -320,6 +341,8 @@ function ClassesCard({ courseId, status }) {
 export default function CourseEditor() {
   const { courseId } = useParams();
   const navigate = useNavigate();
+  const auth = useAuth();
+  const isAdmin = Boolean(auth?.profile?.is_admin);
   const [outline, setOutline] = useState(null);
   const [error, setError] = useState("");
   const [flash, setFlash] = useState("");
@@ -389,7 +412,8 @@ export default function CourseEditor() {
     );
   }
 
-  const owned = outline.owned;
+  // The main admin manages every course, so they get the owner's controls.
+  const owned = outline.owned || isAdmin;
   const modules = outline.modules;
   const liveModules = active(modules);
   const archivedCount =
@@ -532,8 +556,21 @@ export default function CourseEditor() {
         onSave={(values) => run(() => studioApi.updateCourse(outline.id, values), "Saved.")}
       />
 
+      {owned && (
+        <PricingCard
+          key={`pricing-${outline.price}-${outline.access_days}-${outline.payment_instructions}`}
+          course={outline}
+          busy={busy}
+          setDirty={setDirty}
+          onSave={(values) => run(() => studioApi.updateCourse(outline.id, values), "Pricing saved.")}
+        />
+      )}
+      {isAdmin && <OwnerCard key={`owner-${outline.owner_id}`} course={outline} onChanged={reload} />}
       {owned && outline.status !== "draft" && <StatsCard courseId={outline.id} />}
-      {owned && <ClassesCard courseId={outline.id} status={outline.status} />}
+      {owned && (
+        <ClassesCard courseId={outline.id} status={outline.status} price={outline.price} currency={outline.currency} />
+      )}
+      {owned && Boolean(outline.owner_id) && <PaidStudentsCard courseId={outline.id} />}
 
       <div className="section-bar">
         <div>

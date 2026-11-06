@@ -181,7 +181,7 @@ export default function HomeScreen({
             onAction={onCourses}
           />
         ) : (
-          <EmptyState title="No courses yet" message="Your teacher hasn't added courses to your class yet." />
+          <EmptyState title="No courses yet" message="New courses will show up here soon." />
         )}
       </Screen>
 

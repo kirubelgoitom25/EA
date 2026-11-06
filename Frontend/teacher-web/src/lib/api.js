@@ -48,6 +48,9 @@ async function request(path, options = {}) {
     break
   }
 
+  // An image, not JSON. Failures below still arrive as JSON.
+  if (options.raw && res.ok) return res.blob()
+
   let body = null
   try { body = await res.json() } catch { /* empty body */ }
 
@@ -69,6 +72,7 @@ async function request(path, options = {}) {
 
 export const api = {
   get: (path) => request(path),
+  blob: (path) => request(path, { raw: true }),
   put: (path, json) => request(path, { method: 'PUT', body: JSON.stringify(json) }),
   patch: (path, json) => request(path, { method: 'PATCH', body: JSON.stringify(json) }),
   post: (path, json) => request(path, { method: 'POST', body: JSON.stringify(json) }),

@@ -1,5 +1,5 @@
 import React from "react";
-import { StyleSheet, Switch, View } from "react-native";
+import { Pressable, StyleSheet, Switch, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import Svg, { Defs, LinearGradient, Path, Stop } from "react-native-svg";
 
@@ -12,7 +12,7 @@ import Button from "./ui/Button";
 import Screen from "./ui/Screen";
 
 // Profile: who you are, your numbers, and your settings.
-export default function ProfileScreen({ user, onLogout, onHome, onCourses, onRanking, onProfile }) {
+export default function ProfileScreen({ user, onLogout, onRequests, onHome, onCourses, onRanking, onProfile }) {
   const { sound, haptics } = useFeedbackSettings();
   const xp = Number(user.xp) || 0;
   const streak = Math.max(Number(user.streak) || 0, 0);
@@ -38,6 +38,17 @@ export default function ProfileScreen({ user, onLogout, onHome, onCourses, onRan
           <Stat value={xp} label="Total XP" icon={<Ionicons name="star" size={18} color={tokens.accent} />} />
           <Stat value={weekly} label="This week" icon={<Ionicons name="trending-up" size={18} color={tokens.accent} />} />
         </View>
+
+        <Pressable
+          onPress={onRequests}
+          accessibilityRole="button"
+          accessibilityLabel="Payment requests"
+          style={({ pressed }) => [styles.linkRow, pressed && styles.linkPressed]}
+        >
+          <Ionicons name="receipt-outline" size={20} color={tokens.accentText} />
+          <AppText variant="bodyStrong" style={styles.linkLabel}>Payment requests</AppText>
+          <Ionicons name="chevron-forward" size={18} color={tokens.textTertiary} />
+        </Pressable>
 
         <AppText variant="overline" tone="secondary" style={styles.sectionTitle}>
           SETTINGS
@@ -155,6 +166,16 @@ function TailFlame() {
 }
 
 const styles = StyleSheet.create({
+  linkRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: space.md,
+    minHeight: 52,
+    marginTop: space.lg,
+  },
+  linkLabel: { flex: 1 },
+  linkPressed: { opacity: 0.7 },
+
   root: {
     flex: 1,
   },

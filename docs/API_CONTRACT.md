@@ -98,7 +98,7 @@ route keeps its shape and behaviour (see "Unchanged" below).
 | `GET /teacher/courses/{id}/stats` | | Owner only. `{learners, completed_course, hidden, min_aggregate}` |
 | `GET /teacher/courses/{id}/classes` | | Owner only. Each class you teach: `{class_id, name, assigned, students, learners, completed_course}`. These are that class's own numbers (not hidden), separate from `/stats` |
 | `PUT /teacher/courses/{id}/classes/{class_id}` | | Owner only. Gives the course to a class you teach (same entry as `class_courses`), so its progress shows on that class's pages. Safe to repeat. 404 for a class you don't teach |
-| `DELETE /teacher/courses/{id}/classes/{class_id}` | | Takes it back. Students keep their progress; a published course stays open to them anyway |
+| `DELETE /teacher/courses/{id}/classes/{class_id}` | | Takes it back. Students keep their progress. A free published course stays open to them; a paid one closes unless they bought it |
 | `POST /teacher/courses/{id}/modules` | `{title}` | 201 |
 | `PUT /teacher/courses/{id}/modules/order` | `{ids: [module ids]}` | Every non-archived module exactly once, else 422 |
 | `PATCH /teacher/modules/{id}` | `{title?, archived?}` | Module |
@@ -160,3 +160,73 @@ http://127.0.0.1:8001 when the backend runs on your own machine.
 
 ## Supabase project
 Project URL and anon key: provided separately, not committed to Git.
+
+---
+
+## Selling courses
+
+`payment_requests` is the permanent history. `course_access` is the current permission.
+Payment is checked by hand: nothing here talks to a payment provider.
+
+### Rules
+
+- A student can open a course when it is free (`price` 0), or given to their class, or they hold
+  a `course_access` row that is not revoked and has not expired. This is checked on the server at
+  every request, on every lesson route. Anything refused answers 404, the same as a missing lesson.
+- Seeing is not opening. A paid course shows up with its price and chapter titles, and `video_url`
+  is `null` until it is open. Old progress keeps a course visible, never open.
+- `access_days` null means permanent. Time counts from approval. A renewal adds to time that is
+  still running, or counts from now. Nothing shortens permanent access.
+- When a free course gets a price, students with recorded progress keep it permanently. Courses a
+  student only added on their phone leave nothing on the server, so those students see it locked.
+- Progress, XP and streaks are never touched by expiry or revocation.
+
+### `GET /courses` and `GET /courses/{id}`
+
+Both add `price`, `currency`, `access_days`, `payment_instructions`, `purchasable` (false once a
+course is unpublished, so nobody pays for what would be refused) and, for students:
+
+    "access": { "state": "locked", "expires_at": null, "pending_requests": 1 }
+
+`state` is `free`, `class`, `active`, `expired`, `revoked` or `locked`. The first three are open.
+
+### Student routes
+
+| Route | Body | Result |
+|---|---|---|
+| `POST /courses/{id}/payment-requests` | multipart, field `proof`, a JPG, PNG or WebP of at most 5 MB | 201. 200 if the same image is already waiting. 409 if there is nothing to buy (free, in your class, already permanent, not published). 413, 415. 429 once 5 requests are undecided on this course |
+| `GET /me/payment-requests` | | Own requests, newest first: `{id, course_id, course_title, status, amount, currency, access_days, review_note, created_at, reviewed_at}` |
+
+The upload carries only the image. The amount, currency and duration are read from the course, and
+copied onto the request, so a later price change cannot alter it.
+
+### Teacher routes (owner only; the main admin sees all; 404 when not yours)
+
+| Route | Body | Result |
+|---|---|---|
+| `PATCH /teacher/courses/{id}` | also `{price?, access_days?, payment_instructions?}` | `access_days` null means permanent. A price needs instructions and an owner |
+| `GET /teacher/payment-requests` | `?status=&course_id=&teacher_id=&limit=&offset=` | `{items, total, pending_total}`. Each item has the student, the course, what they saw, `terms_changed`, `image_reused`, `current_access` and `after_approval` |
+| `GET /teacher/payment-requests/{id}/proof` | | The image, `no-store` |
+| `POST /teacher/payment-requests/{id}/approve` | | Decides and grants together. 409 if already decided |
+| `POST /teacher/payment-requests/{id}/reject` | `{note?}` | The note is optional. 409 if already decided |
+| `GET /teacher/courses/{id}/access` | | `[{student, state, expires_at, source, granted_at}]` |
+| `DELETE /teacher/courses/{id}/access/{student_id}` | | Revokes. The row and all payment history stay |
+
+### Admin routes (main admin only; 404 for everyone else)
+
+The main admin is `role = "teacher"` with `is_admin` on, shown by `GET /auth/me`. It is set by hand
+in SQL, and no route can change it. They also edit every course through the teacher routes.
+
+| Route | Body | Result |
+|---|---|---|
+| `GET /admin/people` | `?role=&q=&limit=&offset=` | `{items, total}` |
+| `GET /admin/people/{id}` | | The person, their requests, access and owned courses |
+| `PATCH /admin/people/{id}` | `{is_active?, role?}` | 409 for yourself, the main admin, or returning a teacher who still owns courses |
+| `PUT /admin/courses/{id}/owner` | `{owner_id}` | The new owner must be an active teacher |
+| `PUT /admin/courses/{id}/access/{student_id}` | `{access_days}` | Grants or extends with no payment. Null means permanent |
+
+### `GET /ranking`
+
+`scope=national` takes `period` (`weekly`, `monthly`, `overall`) and returns the top 50 for it plus
+the student's own row. Names are first name and last initial, `id` is empty except on the student's
+own row, and each row has its real `position`. `scope=class` keeps full names.

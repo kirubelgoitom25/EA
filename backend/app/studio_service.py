@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import HTTPException
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, exists, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -32,10 +32,12 @@ from app.models import (
     ClassCourse,
     ClassTeacher,
     Course,
+    CourseAccess,
     Lesson,
     LessonActivity,
     LessonProgress,
     Module,
+    PaymentRequest,
     Practice,
     PracticeAttempt,
     PracticeItem,
@@ -43,6 +45,12 @@ from app.models import (
     Quiz,
     QuizAttempt,
     QuizQuestion,
+)
+from app.payment_rules import (
+    SOURCE_EXISTING,
+    clean_access_days,
+    clean_instructions,
+    clean_price,
 )
 from app.studio_rules import (
     DRAFT,
@@ -125,6 +133,11 @@ def _course_out(course: Course, teacher_id: uuid.UUID, editable: bool) -> dict:
         "status": course.status,
         "owned": course.owner_id == teacher_id,
         "editable": editable,
+        "price": course.price,
+        "currency": course.currency,
+        "access_days": course.access_days,
+        "payment_instructions": course.payment_instructions,
+        "owner_id": str(course.owner_id) if course.owner_id else None,
         "published_at": course.published_at,
         "created_at": course.created_at,
         "updated_at": course.updated_at,
@@ -247,9 +260,13 @@ def update_course(db: Session, teacher_id: uuid.UUID, course_id: str, values: di
         changes["title"] = clean_title(values["title"])
     if "description" in values:
         changes["description"] = clean_description(values["description"])
+    changes.update(_pricing_changes(course, values))
+    becomes_paid = not course.price and bool(changes.get("price"))
     with transaction(db):
         for field, value in changes.items():
             setattr(course, field, value)
+        if becomes_paid:
+            _keep_existing_learners(db, course, teacher_id)
         course.updated_at = _now()
         db.flush()
         result = _course_out(course, teacher_id, True)
@@ -257,14 +274,72 @@ def update_course(db: Session, teacher_id: uuid.UUID, course_id: str, values: di
     return result
 
 
-def _require_owner(course: Course, teacher_id: uuid.UUID, what: str) -> None:
-    if course.owner_id != teacher_id:
+def _pricing_changes(course: Course, values: dict) -> dict:
+    """The pricing fields that were sent, checked together with what is already saved."""
+    changes = {}
+    if values.get("price") is not None:
+        changes["price"] = clean_price(values["price"])
+    if "access_days" in values:
+        changes["access_days"] = clean_access_days(values["access_days"])
+    if "payment_instructions" in values:
+        changes["payment_instructions"] = clean_instructions(values["payment_instructions"])
+    if not changes:
+        return changes
+
+    price = changes.get("price", course.price)
+    instructions = changes.get("payment_instructions", course.payment_instructions)
+    if price:
+        if course.owner_id is None:
+            raise ContentError("A course needs an owner before it can have a price")
+        if not instructions:
+            raise ContentError("Tell students how to pay before setting a price")
+    return changes
+
+
+def _keep_existing_learners(db: Session, course: Course, granted_by: uuid.UUID) -> None:
+    """A free course became paid: anyone with recorded progress keeps it, permanently.
+
+    Archived lessons count too. Existing rows are left alone, so going free and back
+    to paid never revives expired or revoked access. Courses a student only added on
+    their phone leave no trace on the server, so those students cannot be found here.
+    """
+    lesson_ids = [
+        r[0]
+        for r in db.execute(
+            select(Lesson.id)
+            .join(Module, Module.id == Lesson.module_id)
+            .where(Module.course_id == course.id)
+        ).all()
+    ]
+    if not lesson_ids:
+        return
+    _, started = _progress_by_student(db, lesson_ids)
+    held = {
+        r[0]
+        for r in db.execute(
+            select(CourseAccess.student_id).where(CourseAccess.course_id == course.id)
+        ).all()
+    }
+    for student_id in started - held:
+        db.add(
+            CourseAccess(
+                student_id=student_id,
+                course_id=course.id,
+                expires_at=None,
+                source=SOURCE_EXISTING,
+                granted_by=granted_by,
+            )
+        )
+
+
+def _require_owner(db: Session, course: Course, teacher_id: uuid.UUID, what: str) -> None:
+    if course.owner_id != teacher_id and not studio_access.is_admin(db, teacher_id):
         raise HTTPException(status_code=403, detail=f"Only the owner can {what}")
 
 
 def set_course_status(db: Session, teacher_id: uuid.UUID, course_id: str, action: str) -> dict:
     course = studio_access.get_editable_course(db, teacher_id, course_id)
-    _require_owner(course, teacher_id, action)  # ownerless legacy courses are always published
+    _require_owner(db, course, teacher_id, action)  # ownerless legacy courses are always published
     target = next_status(course.status, action)
     if target == PUBLISHED:
         lessons = db.execute(
@@ -289,10 +364,21 @@ def set_course_status(db: Session, teacher_id: uuid.UUID, course_id: str, action
     return result
 
 
+def _has_payment_records(db: Session, course_id: str) -> bool:
+    return bool(
+        db.execute(
+            select(
+                exists().where(PaymentRequest.course_id == course_id)
+                | exists().where(CourseAccess.course_id == course_id)
+            )
+        ).scalar()
+    )
+
+
 def delete_course(db: Session, teacher_id: uuid.UUID, course_id: str) -> dict:
     """Hard delete only a course no student has touched. Otherwise: unpublish it."""
     course = studio_access.get_editable_course(db, teacher_id, course_id)
-    _require_owner(course, teacher_id, "delete this course")
+    _require_owner(db, course, teacher_id, "delete this course")
     lesson_ids = [
         r[0]
         for r in db.execute(
@@ -305,6 +391,11 @@ def delete_course(db: Session, teacher_id: uuid.UUID, course_id: str) -> dict:
         raise HTTPException(
             status_code=409,
             detail="Students have progress in this course. Unpublish it instead of deleting it.",
+        )
+    if _has_payment_records(db, course.id):
+        raise HTTPException(
+            status_code=409,
+            detail="This course has payment records. Unpublish it instead of deleting it.",
         )
     with transaction(db):
         _purge_lessons(db, lesson_ids)
@@ -757,7 +848,7 @@ def course_stats(db: Session, teacher_id: uuid.UUID, course_id: str) -> dict:
     """Global, anonymous counts for the owner. No student is identified, and a
     count below MIN_AGGREGATE is hidden. Class statistics live in /classes."""
     course = studio_access.get_editable_course(db, teacher_id, course_id)
-    _require_owner_or_404(course, teacher_id)
+    _require_owner_or_404(db, course, teacher_id)
     lesson_ids = [
         r[0]
         for r in db.execute(
@@ -785,9 +876,9 @@ def course_stats(db: Session, teacher_id: uuid.UUID, course_id: str) -> dict:
     }
 
 
-def _require_owner_or_404(course: Course, teacher_id: uuid.UUID) -> None:
+def _require_owner_or_404(db: Session, course: Course, teacher_id: uuid.UUID) -> None:
     # Course-wide numbers cover students from every class, so only the owner gets them.
-    if course.owner_id != teacher_id:
+    if course.owner_id != teacher_id and not studio_access.is_admin(db, teacher_id):
         raise HTTPException(status_code=404, detail="Course not found")
 
 
@@ -810,7 +901,7 @@ def course_classes(db: Session, teacher_id: uuid.UUID, course_id: str) -> list[d
     numbers. Class numbers are kept apart from the course-wide ones: the teacher already
     sees their own class's students, so these are not hidden below 3."""
     course = studio_access.get_editable_course(db, teacher_id, course_id)
-    _require_owner_or_404(course, teacher_id)
+    _require_owner_or_404(db, course, teacher_id)
     classes = db.execute(
         select(Class)
         .join(ClassTeacher, ClassTeacher.class_id == Class.id)
@@ -855,7 +946,7 @@ def set_class_assignment(
     db: Session, teacher_id: uuid.UUID, course_id: str, class_id: str, assigned: bool
 ) -> dict:
     course = studio_access.get_editable_course(db, teacher_id, course_id)
-    _require_owner(course, teacher_id, "give this course to a class")
+    _require_owner(db, course, teacher_id, "give this course to a class")
     cls = _taught_class(db, teacher_id, class_id)
     with transaction(db):
         existing = db.get(ClassCourse, (cls.id, course.id))
