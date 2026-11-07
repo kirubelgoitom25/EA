@@ -1,6 +1,7 @@
 import { supabase } from "../lib/supabase";
 import { API_BASE_URL } from "../config";
 import { signUpOutcome } from "./authModel";
+import { createResponseCache, createShortReuse, sameInputSameOutput } from "./responseCache";
 
 
 
@@ -21,6 +22,9 @@ class ApiError extends Error {
   }
 }
 
+// The last answer to each GET with its ETag (see responseCache.js).
+const responses = createResponseCache();
+
 // Every backend call goes through here. It attaches the current login
 // token, and turns failures into readable messages.
 async function request(path, options = {}) {
@@ -28,9 +32,13 @@ async function request(path, options = {}) {
     data: { session },
   } = await supabase.auth.getSession();
 
+  const isGet = !options.method || options.method.toUpperCase() === "GET";
+  const kept = isGet && !options.fresh ? responses.get(path) : null;
+
   const headers = {
     "Content-Type": "application/json",
     ...(session ? { Authorization: `Bearer ${session.access_token}` } : {}),
+    ...(kept ? { "If-None-Match": kept.etag } : {}),
     ...options.headers,
   };
 
@@ -44,8 +52,25 @@ async function request(path, options = {}) {
     );
   }
 
+  // Nothing changed since the kept answer: use it, no body was sent.
+  if (response.status === 304) {
+    if (kept) return kept.body;
+    responses.delete(path);
+    return request(path, { ...options, fresh: true });
+  }
+
   const body = await response.json().catch(() => null);
-  return readResult(response.status, body);
+  const result = await readResult(response.status, body);
+  if (isGet) responses.set(path, response.headers?.get?.("etag"), body);
+  return result;
+}
+
+// Everything kept for the signed-in student. Called on every sign-out.
+export function forgetCachedResponses() {
+  responses.clear();
+  recentActivities.clear();
+  mapCourses.reset();
+  mapStats.reset();
 }
 
 // What every call does with the server's answer.
@@ -234,6 +259,7 @@ export async function resetPassword(email, code, password) {
 }
 
 export async function logoutUser() {
+  forgetCachedResponses();
   await supabase.auth.signOut();
   return true;
 }
@@ -261,27 +287,45 @@ export async function restoreSession() {
 
 // ---- Student, courses, ranking ---------------------------------------
 
-export async function fetchStudent() {
-  const [me, stats] = await Promise.all([
-    request("/auth/me"),
-    request("/me/stats"),
-  ]);
+const mapStats = sameInputSameOutput((stats) => ({
+  // Servers from before this field send no name; the login's name is used then.
+  name: stats.name ?? null,
+  xp: Number(stats.xp),
+  streak: stats.current_streak,
+  weeklyXp: Number(stats.weekly_xp),
+  monthlyXp: Number(stats.monthly_xp),
+}));
 
+// XP, streak and the current name. One request: who the student is (id, email, role) is
+// already known from the login, and every request re-checks the account anyway.
+export async function fetchStats() {
+  return mapStats(await request("/me/stats"));
+}
+
+// The student as the screens show them: the login's identity plus fresh stats.
+export function composeStudent(user, stats) {
   return {
-    id: me.id,
-    name: me.name,
-    email: me.email,
-    role: me.role,
-    xp: Number(stats.xp),
-    streak: stats.current_streak,
-    weeklyXp: Number(stats.weekly_xp),
-    monthlyXp: Number(stats.monthly_xp),
+    id: user.id,
+    name: stats.name ?? user.name,
+    email: user.email,
+    role: user.role,
+    xp: stats.xp,
+    streak: stats.streak,
+    weeklyXp: stats.weeklyXp,
+    monthlyXp: stats.monthlyXp,
   };
 }
 
+export async function fetchStudent(user) {
+  return composeStudent(user, await fetchStats());
+}
+
+const mapCourses = sameInputSameOutput((courses) =>
+  Array.isArray(courses) ? courses.map(mapCourse) : [],
+);
+
 export async function fetchCourses() {
-  const courses = await request("/courses");
-  return Array.isArray(courses) ? courses.map(mapCourse) : [];
+  return mapCourses(await request("/courses"));
 }
 
 export async function fetchRanking(scope = "class", period = "weekly") {
@@ -403,7 +447,10 @@ export async function fetchQuizByLessonId(lessonId) {
 // answers: [{ questionId, selectedIndex }]. We send WHAT the student picked,
 // never a score. The server grades it, works out the attempt number and the
 // XP itself, records everything, and tells us the result.
-export async function submitQuiz(lessonId, answers) {
+// submissionId: the same for every try of one chapter submission, so a retry is never
+// recorded twice (see chapterProgress.submissionIdFor).
+export async function submitQuiz(lessonId, answers, submissionId = null) {
+  recentActivities.clear(); // a submit completes the quiz activity
   const result = await request(`${lessonPath(lessonId)}/quiz/submit`, {
     method: "POST",
     body: JSON.stringify({
@@ -411,6 +458,7 @@ export async function submitQuiz(lessonId, answers) {
         question_id: answer.questionId,
         selected_index: answer.selectedIndex,
       })),
+      ...(submissionId ? { submission_id: submissionId } : {}),
     }),
   });
 
@@ -458,7 +506,8 @@ export async function fetchPracticeByLessonId(lessonId) {
 }
 
 // answers: [{ itemId, textAnswer, selectedIndex }]
-export async function submitPractice(lessonId, answers) {
+export async function submitPractice(lessonId, answers, submissionId = null) {
+  recentActivities.clear();
   const result = await request(`${lessonPath(lessonId)}/practice/submit`, {
     method: "POST",
     body: JSON.stringify({
@@ -467,6 +516,7 @@ export async function submitPractice(lessonId, answers) {
         text_answer: answer.textAnswer,
         selected_index: answer.selectedIndex,
       })),
+      ...(submissionId ? { submission_id: submissionId } : {}),
     }),
   });
 
@@ -484,7 +534,15 @@ export async function submitPractice(lessonId, answers) {
 // The lesson's ordered activities. Returns null when the server has none to give (a lesson that
 // is not open to this student, or a server without Course Studio yet), so older chapters keep
 // working exactly as before.
-export async function fetchLessonActivities(lessonId) {
+// Opening a chapter asks for its activities twice in a row (to pick the screen, then the
+// screen itself), so an answer is shared for a few seconds. Completing anything clears it.
+const recentActivities = createShortReuse(5000);
+
+export function fetchLessonActivities(lessonId) {
+  return recentActivities.run(lessonId, () => loadLessonActivities(lessonId));
+}
+
+async function loadLessonActivities(lessonId) {
   try {
     const result = await request(`${lessonPath(lessonId)}/activities`);
     return {
@@ -510,6 +568,7 @@ export async function fetchLessonActivities(lessonId) {
 
 // The explicit "Mark complete" for a video or reading. Opening one never counts.
 export async function completeActivity(activityId) {
+  recentActivities.clear();
   const result = await request(`/activities/${encodeURIComponent(activityId)}/complete`, {
     method: "POST",
   });

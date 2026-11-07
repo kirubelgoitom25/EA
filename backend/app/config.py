@@ -10,6 +10,8 @@ class Settings(BaseSettings):
     supabase_service_role_key: str = ""
     # Comma-separated extra browser origins, such as the hosted teacher dashboard.
     cors_origins: str = ""
+    # The calendar day streaks count in (see app/clock.py).
+    app_timezone: str = "Africa/Addis_Ababa"
 
     model_config = SettingsConfigDict(env_file=".env")
 

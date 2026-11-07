@@ -4,7 +4,10 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import bindparam, text
 from sqlalchemy.orm import Session
 
+from datetime import timedelta
+
 from app.attention import class_attention
+from app.clock import local_today
 from app.course_activity import current_courses_for_class
 from app.database import get_db
 from app.deps import require_teacher
@@ -48,7 +51,7 @@ CLASS_STUDENTS_QUERY = text("""
            coalesce(sum(x.amount) filter (where x.created_at >= now() - interval '7 days'), 0) as weekly_xp,
            coalesce(sum(x.amount) filter (where x.created_at >= now() - interval '30 days'), 0) as monthly_xp,
            max(x.created_at) as last_active_at,
-           coalesce(max(case when s.last_activity_date >= current_date - 1
+           coalesce(max(case when s.last_activity_date >= :yesterday
                              then s.current_streak end), 0) as current_streak
     from profiles p
     left join xp_events x on x.student_id = p.id
@@ -176,7 +179,11 @@ def list_class_students(
 ):
     _require_teacher_class(db, current_user, class_id)
 
-    rows = db.execute(CLASS_STUDENTS_QUERY, {"class_id": class_id}).mappings().all()
+    # Yesterday in EA's local day (see app/clock.py), not the database's UTC date.
+    yesterday = local_today() - timedelta(days=1)
+    rows = db.execute(
+        CLASS_STUDENTS_QUERY, {"class_id": class_id, "yesterday": yesterday}
+    ).mappings().all()
     total_lessons = db.execute(CLASS_LESSON_TOTAL_QUERY, {"class_id": class_id}).scalar() or 0
     done_rows = db.execute(CLASS_LESSONS_DONE_QUERY, {"class_id": class_id}).mappings().all()
     done_by_student = {str(r["student_id"]): r["done"] for r in done_rows}

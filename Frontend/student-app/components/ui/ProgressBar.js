@@ -8,28 +8,34 @@ import { useReducedMotion } from "./motion";
 // Progress in EA is always the Tail: the fox's orange-to-magenta gradient.
 // value is 0..1; the fill eases to its new width (instantly with Reduce
 // Motion). onPlum = the darker track used on the plum card. fill / track: plain colours instead of
-// the Tail and the usual track (the neutral path screens use moss on stone).
+// the Tail and the usual track (the neutral path screens use moss on stone). intro: { delay, duration }
+// to fill from empty when the bar first appears.
 export default function ProgressBar({
   value = 0,
   height = 8,
   onPlum = false,
   fill,
   track,
+  intro,
   style,
   accessibilityLabel,
 }) {
   const clamped = Math.max(0, Math.min(1, Number(value) || 0));
   const reduceMotion = useReducedMotion();
-  const width = useRef(new Animated.Value(clamped)).current;
+  const width = useRef(new Animated.Value(intro ? 0 : clamped)).current;
+  const firstFill = useRef(intro);
 
   useEffect(() => {
+    const { delay = 0, duration = motion.base } = firstFill.current ?? {};
+    firstFill.current = null;
     if (reduceMotion) {
       width.setValue(clamped);
       return undefined;
     }
     const animation = Animated.timing(width, {
       toValue: clamped,
-      duration: motion.base,
+      delay,
+      duration,
       easing: Easing.out(Easing.cubic),
       useNativeDriver: false,
     });

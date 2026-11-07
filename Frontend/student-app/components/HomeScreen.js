@@ -146,6 +146,7 @@ export default function HomeScreen({
               const number = start + i + 1;
               const status = chapter.completed ? "done" : chapter.id === resumeChapter?.id ? "next" : "todo";
               return {
+                id: `chapter-${chapter.id}`,
                 status,
                 number,
                 tag: `Chapter ${number}`,

@@ -5,25 +5,46 @@ import jwt
 from fastapi import Depends, HTTPException
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jwt import PyJWKClient
-from sqlalchemy import text
+from sqlalchemy import Boolean, DateTime, text
+from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.database import get_db
-from app.models import Profile
 
 bearer_scheme = HTTPBearer(auto_error=False)
-jwks_client = PyJWKClient(settings.supabase_jwks_url)
+# The signing keys are kept for an hour. A token signed with a key not seen yet makes the
+# client fetch the keys again at once, so a key rotation still works straight away.
+jwks_client = PyJWKClient(settings.supabase_jwks_url, lifespan=3600)
 
 # The apps look for this exact text to recognise a turned-off account, so do
 # not reword it without changing them too.
 ACCOUNT_OFF_MESSAGE = "This account is turned off."
 
-# A Supabase ban lives on the auth user (banned_until), not on our profile, and
-# tokens that were already issued keep working until they expire. So the ban is
-# checked on every request. A user who was never banned gives NULL, which is
-# treated as "not banned".
-BANNED_QUERY = text("select banned_until > now() from auth.users where id = :id")
+# The profile and the ban, in one round trip. A Supabase ban lives on the auth user
+# (banned_until), not on our profile, and tokens that were already issued keep working
+# until they expire, so the ban is checked on every request. A user who was never banned
+# (NULL), or has no auth row, counts as "not banned".
+CURRENT_USER_QUERY = text("""
+    select p.id, p.name, p.role, p.is_active, p.class_id, p.is_admin, p.created_at,
+           coalesce((select u.banned_until > now() from auth.users u where u.id = p.id), false)
+               as banned
+    from profiles p
+    where p.id = :id
+""").columns(
+    id=UUID(as_uuid=True),
+    is_active=Boolean,
+    is_admin=Boolean,
+    created_at=DateTime(timezone=True),
+    banned=Boolean,
+)
+
+
+def _keys_unreachable() -> HTTPException:
+    # Supabase's key list could not be fetched, so the token could not be checked either
+    # way. Refused, but as "try again" rather than "logged out": a 401 here would sign
+    # every student out during a short outage.
+    return HTTPException(status_code=503, detail="Sign-in check unavailable. Please try again.")
 
 
 def _invalid_token() -> HTTPException:
@@ -53,6 +74,8 @@ def get_current_user(
             # bounce a student straight back out at their very first login.
             leeway=10,
         )
+    except jwt.PyJWKClientConnectionError:
+        raise _keys_unreachable()
     except jwt.PyJWTError:
         raise _invalid_token()
 
@@ -61,14 +84,13 @@ def get_current_user(
     except ValueError:
         raise _invalid_token()
 
-    profile = db.get(Profile, profile_id)
+    profile = db.execute(CURRENT_USER_QUERY, {"id": profile_id}).first()
     if profile is None:
         raise _invalid_token()
 
     # A turned-off account is refused even when its token is still valid:
     # either our own flag is off, or Supabase has the user banned.
-    banned = db.execute(BANNED_QUERY, {"id": profile_id}).scalar()
-    if not profile.is_active or banned:
+    if not profile.is_active or profile.banned:
         raise HTTPException(status_code=403, detail=ACCOUNT_OFF_MESSAGE)
 
     return {

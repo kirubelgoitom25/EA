@@ -32,6 +32,17 @@ export function readCallback(url) {
   };
 }
 
+// What's safe to log about a callback. Never the code: it's a secret, and Supabase can quote
+// Google's code inside its error message.
+export function callbackLog(url) {
+  const { code, error, errorCode } = readCallback(url);
+  return {
+    hasCode: Boolean(code),
+    errorCode: errorCode ?? null,
+    error: error?.replace(/4\/[\w-]+/g, "4/<hidden>") ?? null,
+  };
+}
+
 // A failed Google sign-in, in words. banned is the account-off case, shown the usual way.
 export function googleError({ error, errorCode }) {
   const text = `${error ?? ""} ${errorCode ?? ""}`.toLowerCase();

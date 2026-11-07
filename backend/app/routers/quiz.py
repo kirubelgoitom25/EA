@@ -1,11 +1,14 @@
 import uuid
+from datetime import datetime, timedelta, timezone
 from decimal import ROUND_HALF_UP, Decimal
+from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
-from app import studio_sync
+from app import studio_sync, submissions
 from app.access import lesson_is_in_class
 from app.database import get_db
 from app.deps import require_student
@@ -86,6 +89,88 @@ def get_quiz(
     }
 
 
+# An older app sends no submission id. Two identical submits this close together, the
+# second losing the race for the attempt number, are one double tap.
+DOUBLE_TAP_SECONDS = 30
+
+
+def _quiz_result(attempt: QuizAttempt) -> dict:
+    n = attempt.attempt_number
+    return {
+        "attempt_number": n,
+        "score": attempt.score,
+        "total_questions": attempt.total_questions,
+        # Stored as numeric(6,2); sent the way a fresh submit sends it, so a retry answers
+        # exactly like the first try.
+        "xp_earned": Decimal(attempt.xp_earned).quantize(Decimal("1"), rounding=ROUND_HALF_UP),
+        "xp_per_correct": _xp_per_correct(n),
+        "next_xp_per_correct": _xp_per_correct(n + 1),
+        "all_correct": attempt.score == attempt.total_questions,
+    }
+
+
+def _earlier_attempt(db: Session, student_id: uuid.UUID, quiz_id: int, submission_id) -> Optional[QuizAttempt]:
+    """The attempt this same submission already made, if any."""
+    query = db.query(QuizAttempt).filter(
+        QuizAttempt.student_id == student_id, QuizAttempt.quiz_id == quiz_id
+    )
+    if submission_id is not None:
+        found = submissions.find(db, "quiz", student_id, quiz_id, submission_id)
+        return db.get(QuizAttempt, found) if found is not None else None
+    since = datetime.now(timezone.utc) - timedelta(seconds=DOUBLE_TAP_SECONDS)
+    return (
+        query.filter(QuizAttempt.created_at >= since)
+        .order_by(QuizAttempt.attempt_number.desc())
+        .first()
+    )
+
+
+def _record_attempt(db, student_id, lesson_id, quiz, score, submission_id) -> dict:
+    total_questions = len(quiz.questions)
+    attempt_number = _next_attempt_number(db, student_id, quiz.id)
+    xp_per_correct = _xp_per_correct(attempt_number)
+    xp_earned = (Decimal(score) * xp_per_correct).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+
+    attempt = QuizAttempt(
+        student_id=student_id,
+        quiz_id=quiz.id,
+        attempt_number=attempt_number,
+        score=score,
+        total_questions=total_questions,
+        xp_earned=xp_earned,
+    )
+    db.add(attempt)
+    if submission_id is not None:
+        db.flush()
+        submissions.tag(db, "quiz", attempt.id, submission_id)
+
+    already_completed = (
+        db.query(LessonProgress)
+        .filter(
+            LessonProgress.student_id == student_id,
+            LessonProgress.lesson_id == lesson_id,
+        )
+        .first()
+        is not None
+    )
+    if not already_completed:
+        db.add(LessonProgress(student_id=student_id, lesson_id=lesson_id))
+
+    award_xp(db, student_id, xp_earned, "quiz", quiz.id)
+    studio_sync.record_attempt_progress(db, student_id, lesson_id, "quiz")
+    db.commit()
+
+    return {
+        "attempt_number": attempt_number,
+        "score": score,
+        "total_questions": total_questions,
+        "xp_earned": xp_earned,
+        "xp_per_correct": xp_per_correct,
+        "next_xp_per_correct": _xp_per_correct(attempt_number + 1),
+        "all_correct": score == total_questions,
+    }
+
+
 @router.post("/{lesson_id}/quiz/submit", response_model=QuizResultOut)
 def submit_quiz(
     lesson_id: str,
@@ -115,45 +200,22 @@ def submit_quiz(
         for answer in body.answers
         if correct_by_id.get(answer.question_id) == answer.selected_index
     )
-    total_questions = len(quiz.questions)
 
-    attempt_number = _next_attempt_number(db, student_id, quiz.id)
-    xp_per_correct = _xp_per_correct(attempt_number)
-    xp_earned = (Decimal(score) * xp_per_correct).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+    # The same submission sent again (a retry after a lost answer): its first result,
+    # with nothing recorded or awarded twice.
+    if body.submission_id is not None:
+        earlier = _earlier_attempt(db, student_id, quiz.id, body.submission_id)
+        if earlier is not None:
+            return _quiz_result(earlier)
 
-    db.add(
-        QuizAttempt(
-            student_id=student_id,
-            quiz_id=quiz.id,
-            attempt_number=attempt_number,
-            score=score,
-            total_questions=total_questions,
-            xp_earned=xp_earned,
-        )
-    )
-
-    already_completed = (
-        db.query(LessonProgress)
-        .filter(
-            LessonProgress.student_id == student_id,
-            LessonProgress.lesson_id == lesson_id,
-        )
-        .first()
-        is not None
-    )
-    if not already_completed:
-        db.add(LessonProgress(student_id=student_id, lesson_id=lesson_id))
-
-    award_xp(db, student_id, xp_earned, "quiz", quiz.id)
-    studio_sync.record_attempt_progress(db, student_id, lesson_id, "quiz")
-    db.commit()
-
-    return {
-        "attempt_number": attempt_number,
-        "score": score,
-        "total_questions": total_questions,
-        "xp_earned": xp_earned,
-        "xp_per_correct": xp_per_correct,
-        "next_xp_per_correct": _xp_per_correct(attempt_number + 1),
-        "all_correct": score == total_questions,
-    }
+    for _ in range(2):
+        try:
+            return _record_attempt(db, student_id, lesson_id, quiz, score, body.submission_id)
+        except IntegrityError:
+            # Another request recorded at the same moment. If it was this same submission
+            # (a double tap), answer with what it recorded; otherwise go again on top of it.
+            db.rollback()
+            earlier = _earlier_attempt(db, student_id, quiz.id, body.submission_id)
+            if earlier is not None:
+                return _quiz_result(earlier)
+    raise HTTPException(status_code=409, detail="This chapter is being saved already. Please try again.")

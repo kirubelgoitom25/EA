@@ -7,6 +7,7 @@ from sqlalchemy import (
     Date,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     Numeric,
     String,
@@ -15,7 +16,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import relationship
-from sqlalchemy.sql import func
+from sqlalchemy.sql import func, text
 
 from app.database import Base
 
@@ -154,6 +155,12 @@ class QuizQuestion(Base):
 
 class QuizAttempt(Base):
     __tablename__ = "quiz_attempts"
+    # Both exist in the database; listed here so test databases enforce them too.
+    # Exists in the database; listed here so test databases enforce it too. The table also
+    # has client_submission_id (see app/submissions.py), deliberately not mapped here.
+    __table_args__ = (
+        UniqueConstraint("student_id", "quiz_id", "attempt_number", name="uq_quiz_attempt"),
+    )
 
     id = Column(Integer, primary_key=True)
     student_id = Column(
@@ -209,6 +216,16 @@ class PracticeItem(Base):
 
 class PracticeAttempt(Base):
     __tablename__ = "practice_attempts"
+    __table_args__ = (
+        Index(
+            "uq_practice_first_completion",
+            "student_id",
+            "practice_id",
+            unique=True,
+            postgresql_where=text("is_first_completion"),
+            sqlite_where=text("is_first_completion"),
+        ),
+    )
 
     id = Column(Integer, primary_key=True)
     student_id = Column(

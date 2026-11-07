@@ -2,14 +2,13 @@ import uuid
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
-from app import studio_access
+from app import snapshots, studio_access
 from app.database import get_db
 from app.deps import get_current_user
-from app.models import Course, LessonProgress, Module, PaymentRequest
-from app.payment_rules import OPEN_STATES, PENDING
+from app.models import Course, LessonProgress, Module
+from app.payment_rules import OPEN_STATES
 from app.schemas import CourseDetailOut, CourseListItemOut
 
 router = APIRouter(prefix="/courses", tags=["courses"])
@@ -24,35 +23,31 @@ def _completed_lesson_ids(db: Session, student_id: uuid.UUID) -> set[str]:
     return {row[0] for row in rows}
 
 
-def _visible_course_ids_for_student(db: Session, student_id: uuid.UUID, class_id) -> set[str]:
-    return studio_access.visible_course_ids_for_student(db, student_id, class_id)
-
-
 def _visible_course_ids_for_teacher(db: Session, teacher_id: uuid.UUID) -> set[str]:
     return studio_access.visible_course_ids_for_teacher(db, teacher_id)
 
 
-def _student_access(db: Session, current_user: dict, course_ids: list[str]) -> dict[str, dict]:
-    """{course_id: the access block} for one student, in a fixed number of queries."""
-    student_id = uuid.UUID(current_user["id"])
-    access = studio_access.access_for_student(
-        db, student_id, current_user.get("class_id"), course_ids
-    )
-    waiting = dict(
-        db.execute(
-            select(PaymentRequest.course_id, func.count(PaymentRequest.id))
-            .where(
-                PaymentRequest.student_id == student_id,
-                PaymentRequest.status == PENDING,
-                PaymentRequest.course_id.in_(course_ids),
-            )
-            .group_by(PaymentRequest.course_id)
-        ).all()
-    )
+def _access_block(view: studio_access.CourseView) -> dict:
     return {
-        course_id: {**entry, "pending_requests": waiting.get(course_id, 0)}
-        for course_id, entry in access.items()
+        "state": view.state,
+        "expires_at": view.expires_at,
+        "pending_requests": view.waiting,
     }
+
+
+def _student_courses(db: Session, current_user: dict, course_ids=None) -> list[dict]:
+    """The courses this student may see, from the shared catalogue: one query for their
+    class, access and waiting payments, one for the lessons they finished."""
+    student_id = uuid.UUID(current_user["id"])
+    catalog = snapshots.catalog.get(db)
+    views = studio_access.student_course_views(
+        db, student_id, current_user.get("class_id"), course_ids, with_waiting=True, catalog=catalog
+    )
+    shown = [course for course in catalog.courses if course.id in views and views[course.id].visible]
+    if not shown:
+        return []
+    completed = _completed_lesson_ids(db, student_id)
+    return [_course_to_dict(course, completed, _access_block(views[course.id])) for course in shown]
 
 
 def _course_to_dict(course: Course, completed: set[str], access: Optional[dict] = None) -> dict:
@@ -105,23 +100,16 @@ def list_courses(
     current_user: dict = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    if current_user["role"] == "student":
+        return _student_courses(db, current_user)
+
     completed = _completed_lesson_ids(db, uuid.UUID(current_user["id"]))
     query = db.query(Course).options(selectinload(Course.modules).selectinload(Module.lessons))
-
-    if current_user["role"] == "student":
-        visible_ids = _visible_course_ids_for_student(
-            db, uuid.UUID(current_user["id"]), current_user.get("class_id")
-        )
-        query = query.filter(Course.id.in_(visible_ids)) if visible_ids else query.filter(False)
-    elif current_user["role"] == "teacher":
+    if current_user["role"] == "teacher":
         visible_ids = _visible_course_ids_for_teacher(db, uuid.UUID(current_user["id"]))
         query = query.filter(Course.id.in_(visible_ids)) if visible_ids else query.filter(False)
-
     courses = query.order_by(Course.sort_order).all()
-    access = {}
-    if current_user["role"] == "student" and courses:
-        access = _student_access(db, current_user, [course.id for course in courses])
-    return [_course_to_dict(course, completed, access.get(course.id)) for course in courses]
+    return [_course_to_dict(course, completed) for course in courses]
 
 
 @router.get("/{course_id}", response_model=CourseDetailOut)
@@ -131,12 +119,12 @@ def get_course(
     db: Session = Depends(get_db),
 ):
     if current_user["role"] == "student":
-        visible_ids = _visible_course_ids_for_student(
-            db, uuid.UUID(current_user["id"]), current_user.get("class_id")
-        )
-        if course_id not in visible_ids:
+        found = _student_courses(db, current_user, [course_id])
+        if not found:
             raise HTTPException(status_code=404, detail="Course not found")
-    elif current_user["role"] == "teacher":
+        return found[0]
+
+    if current_user["role"] == "teacher":
         visible_ids = _visible_course_ids_for_teacher(db, uuid.UUID(current_user["id"]))
         if course_id not in visible_ids:
             raise HTTPException(status_code=404, detail="Course not found")
@@ -150,7 +138,4 @@ def get_course(
     )
     if course is None:
         raise HTTPException(status_code=404, detail="Course not found")
-    access = None
-    if current_user["role"] == "student":
-        access = _student_access(db, current_user, [course.id]).get(course.id)
-    return _course_to_dict(course, completed, access)
+    return _course_to_dict(course, completed)

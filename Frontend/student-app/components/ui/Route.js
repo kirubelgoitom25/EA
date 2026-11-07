@@ -1,9 +1,10 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Animated, Easing, Pressable, StyleSheet, View, useWindowDimensions } from "react-native";
 import Svg, { Path } from "react-native-svg";
 
 import { layout, space, stone, tokens } from "../../theme";
 import AppText from "./AppText";
+import DriftingLine from "./DriftingLine";
 import { Entrance } from "./anim";
 import Fox from "./Fox";
 import { FoxFigure, FoxHeadLean } from "./CourseFox";
@@ -11,9 +12,12 @@ import FoxPeek, { CSS_EASE, PEEK } from "./FoxPeek";
 import { TITLE_FOX, placeEdgeFox, placeTitleFox, scaleOf } from "./foxPlacement";
 import { useReducedMotion } from "./motion";
 import { layoutPath, pathD, pathLength, pathPoints, pointAt, travelled, wordsSide } from "./pathModel";
+import { ARRIVAL, burstDelay, newlyDone } from "./pathMotionModel";
 import Rock, { Dome, ROCKS, ringTop, rockBox } from "./Rock";
+import Sparkle from "./Sparkle";
 
 const AnimatedPath = Animated.createAnimatedComponent(Path);
+const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
 // The path: stepping stones to the den. A rock for every step (a chapter, or a video, a reading, a
 // set of questions) on a gently meandering line, joined by a dotted line that curves between them:
@@ -24,7 +28,8 @@ const AnimatedPath = Animated.createAnimatedComponent(Path);
 // sits between two parts of a course, and the den is a big one at the end. The fox walks the path
 // with you: it stands beside the rock you are at and, when you make progress, walks to the next.
 //
-// - items: [{ status: "done" | "next" | "todo", type?, number?, eyebrow?, kicker?, title, caption?, action?, accessibilityLabel }]
+// - items: [{ id?, status: "done" | "next" | "todo", type?, number?, eyebrow?, kicker?, title, caption?, action?, accessibilityLabel }]
+//     id: names the step across paths; a step with one bursts into a sparkle when it is completed.
 //     type: "video" | "reading" | "questions": the rock shows that icon; without it, the step's number
 //     (a check once done). tag: the few words by a rock that say what it is, "Chapter 3" (a typed step
 //     says "Video", "Reading" or "Questions" instead). eyebrow: this step starts a new part with that name: a dome sits on the
@@ -48,6 +53,7 @@ const AnimatedPath = Animated.createAnimatedComponent(Path);
 //     "ledge": the fox stands on the tab bar (the screen draws her); darker dots run along the done
 //       line to the current step every 7 s
 //   The rows keep the room they had for the head, so nothing on the path moves.
+// - arrival: what useArrival gave the screen, to have the path appear step by step (arrival.js)
 // The geometry lives in pathModel.js; where the fox may stand, in foxPlacement.js.
 
 const ICONS = { video: "play", reading: "document-text", questions: "help" };
@@ -69,7 +75,9 @@ export function routeMetrics(items, cta = true, foxAbove = true, zigzag = true) 
 // Where the fox stood on each path last time it was drawn (kept while the app runs).
 const lastStop = {};
 
-export default function Route({ items, den, onPress, cta = true, foxKey, fox = true, words = true, foxPlace = "above", zigzag = true, mascot = null, style }) {
+// scrollY / viewHeight (optional): where the screen is, in the route's own coordinates, so only the
+// part of the drifting line near the screen moves (see DriftingLine).
+export default function Route({ items, den, onPress, cta = true, foxKey, fox = true, words = true, foxPlace = "above", zigzag = true, mascot = null, arrival = null, scrollY = null, viewHeight = null, style }) {
   const reduce = useReducedMotion();
   const { width: screenWidth } = useWindowDimensions();
   const [measured, setMeasured] = useState(null);
@@ -159,21 +167,47 @@ export default function Route({ items, den, onPress, cta = true, foxKey, fox = t
   const pulse = lineMotion === "edge" && nextAt >= 1 && last === nextAt; // the piece into the current step glows
   const spark = lineMotion === "ledge" && last >= 1; // dots run along the done line
   const sparkLength = spark ? Math.round(pathLength(points, 0, last, curve)) : 0;
-  const { flow, glow, run } = useLineMotion(lineMotion, sparkLength);
+  const { glow, run } = useLineMotion(lineMotion, sparkLength);
   const dashed = { strokeWidth: DOT, strokeLinecap: "round", strokeDasharray: dash, fill: "none" };
+  const looks = arrival?.looks;
+
+  // A step just completed bursts, as its check appears: at once, or once it has arrived on the page.
+  // A layout effect, so the first frame with the check already has its particles.
+  const [bursts, setBursts] = useState([]);
+  const arrivalReady = !arrival || !!arrival.plan;
+  const statuses = items.map((item) => `${item.id}:${item.status}`).join();
+  useLayoutEffect(() => {
+    if (!arrivalReady) return;
+    const fresh = newlyDone(items).map((index) => ({ id: items[index].id, index, delay: burstDelay(arrival?.plan, index, Date.now()) }));
+    if (fresh.length && !reduce) setBursts((now) => [...now, ...fresh]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [statuses, arrivalReady]);
 
   return (
     <View style={[{ height: rows.total }, style]} onLayout={(event) => setMeasured(Math.round(event.nativeEvent.layout.width))}>
+      <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, looks?.lineClip]}>
+      <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, looks?.lineHold]}>
       {/* the dotted path: stone grey all the way, with the moss-green dots over the part you have done */}
-      {points.length > 1 ? (
+      {points.length > 1 && lineMotion === "title" ? (
+        // the dots drift forward along the whole line, one gap every 2.8 s: stone grey all the way,
+        // moss green over the part you have done. Dash views moved on the UI thread (DriftingLine).
+        <DriftingLine
+          points={points}
+          curve={curve}
+          last={last}
+          height={rows.total}
+          dash={dash}
+          thickness={DOT}
+          lineColor={stone.line}
+          doneColor={stone.moss}
+          duration={FLOW}
+          scrollY={scrollY}
+          viewHeight={viewHeight}
+        />
+      ) : null}
+      {points.length > 1 && lineMotion !== "title" ? (
         <Svg width={width} height={rows.total} style={StyleSheet.absoluteFill} pointerEvents="none">
-          {lineMotion === "title" ? (
-            <>
-              {/* the dots drift forward along the whole line, one gap every 2.8 s */}
-              <AnimatedPath d={pathD(points, 0, points.length - 1, curve)} stroke={stone.line} strokeDashoffset={flow} {...dashed} />
-              {last > 0 ? <AnimatedPath d={pathD(points, 0, last, curve)} stroke={stone.moss} strokeDashoffset={flow} {...dashed} /> : null}
-            </>
-          ) : (
+          {(
             <>
               {/* with the glow, the grey starts at the current step (so none shows through the glowing
                   piece), its dots in step with the line from the start */}
@@ -210,6 +244,8 @@ export default function Route({ items, den, onPress, cta = true, foxKey, fox = t
           </Svg>
         </Animated.View>
       ) : null}
+      </Animated.View>
+      </Animated.View>
 
       {/* a tap anywhere else puts the callout away */}
       {callout ? <Pressable style={StyleSheet.absoluteFill} onPress={() => setCallout(null)} accessible={false} importantForAccessibility="no" /> : null}
@@ -228,13 +264,15 @@ export default function Route({ items, den, onPress, cta = true, foxKey, fox = t
             accessibilityLabel={`${item.eyebrow}${items[i - 1].status === "done" ? ", finished" : ""}`}
             style={[styles.pinned, { left: at.x - 28, top: at.y - 23 }]}
           >
-            <Dome size={56} lit={items[i - 1].status === "done"} />
+            <Animated.View style={looks?.rise(i)}>
+              <Dome size={56} lit={items[i - 1].status === "done"} />
+            </Animated.View>
           </Pressable>
-          <Pressable
+          <AnimatedPressable
             onPress={() => toggle({ kind: "dome", index: i })}
             accessible={false}
             importantForAccessibility="no"
-            style={[styles.partName, { top: at.y - 12 }, toTheRight ? { left: at.x + 38, right: 0 } : { left: 0, right: width - at.x + 38, alignItems: "flex-end" }]}
+            style={[styles.partName, { top: at.y - 12 }, toTheRight ? { left: at.x + 38, right: 0 } : { left: 0, right: width - at.x + 38, alignItems: "flex-end" }, looks?.label(i)]}
           >
             <MeasuredText
               variant="label"
@@ -246,7 +284,7 @@ export default function Route({ items, den, onPress, cta = true, foxKey, fox = t
             >
               {item.eyebrow}
             </MeasuredText>
-          </Pressable>
+          </AnimatedPressable>
           </React.Fragment>
         );
       })}
@@ -259,13 +297,15 @@ export default function Route({ items, den, onPress, cta = true, foxKey, fox = t
       {/* the course fox, under the steps and their words; the screen's edges clip her */}
       {seen ? (
         <View pointerEvents="none" style={[styles.clip, { left: -off, width: screenWidth, height: rows.total }]}>
-          <GlideTo spot={spot} offset={off} reduce={reduce}>
-            {mascot === "title" ? (
-              <FoxFigure spec={TITLE_FOX} k={k} motion="breathe" reduce={reduce} />
-            ) : spot ? (
-              <FoxHeadLean k={k} mirrored={spot.mirrored} reduce={reduce} />
-            ) : null}
-          </GlideTo>
+          <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, looks?.fox]}>
+            <GlideTo spot={spot} offset={off} reduce={reduce}>
+              {mascot === "title" ? (
+                <FoxFigure spec={TITLE_FOX} k={k} motion="breathe" reduce={reduce} />
+              ) : spot ? (
+                <FoxHeadLean k={k} mirrored={spot.mirrored} reduce={reduce} />
+              ) : null}
+            </GlideTo>
+          </Animated.View>
         </View>
       ) : null}
 
@@ -283,6 +323,7 @@ export default function Route({ items, den, onPress, cta = true, foxKey, fox = t
           onPress={onPress}
           onNote={() => toggle({ kind: "step", index: i })}
           report={report}
+          looks={looks}
         />
       ))}
 
@@ -294,11 +335,27 @@ export default function Route({ items, den, onPress, cta = true, foxKey, fox = t
           accessibilityLabel={`${den.title}. ${den.caption}`}
           style={[styles.pinned, { left: points[n].x - 46, top: points[n].y - 38 }]}
         >
-          <Dome size={92} lit={!!den.reached} />
+          <Animated.View style={looks?.rise(n)}>
+            <Dome size={92} lit={!!den.reached} />
+          </Animated.View>
         </Pressable>
       ) : null}
 
       {fox && !above && !mascot && foxAt >= 0 ? <FoxMarker foxKey={foxKey} index={foxAt} count={n} points={points} curve={curve} width={width} reduce={reduce} /> : null}
+
+      {reduce
+        ? null
+        : bursts.map(({ id, index, delay }) =>
+            points[index] ? (
+              <Sparkle
+                key={id}
+                x={points[index].x}
+                y={rows.centers[index]}
+                delay={delay}
+                onDone={() => setBursts((now) => now.filter((burst) => burst.id !== id))}
+              />
+            ) : null,
+          )}
 
       {note ? <Callout note={note} width={width} total={rows.total} /> : null}
     </View>
@@ -308,7 +365,7 @@ export default function Route({ items, den, onPress, cta = true, foxKey, fox = t
 // One step: its rock, and, if it is the one you are at, its bubble and its words.
 // report(key, rect): when the course fox needs to know, where this step's words are (in the path's
 // coordinates): its tag, or, for the current step, its kicker, its title's lines and its button.
-function Step({ item, index, width, x, center, cta, words, zigzag, onPress, onNote, report }) {
+function Step({ item, index, width, x, center, cta, words, zigzag, onPress, onNote, report, looks }) {
   const next = item.status === "next";
   const done = item.status === "done";
   const size = ROCK[item.status] ?? ROCK.todo;
@@ -334,15 +391,19 @@ function Step({ item, index, width, x, center, cta, words, zigzag, onPress, onNo
         accessibilityLabel={item.accessibilityLabel ?? item.title}
         style={[styles.pinned, { left: x - box.cx, top: center - box.cy, width: box.width, height: box.height }]}
       >
-        {({ pressed }) => <Rock status={item.status} size={size} icon={icon} ring={next} pressed={pressed} />}
+        {({ pressed }) => (
+          <Animated.View style={looks?.rise(index)}>
+            <Rock status={item.status} size={size} icon={icon} ring={next} pressed={pressed} wait={looks ? ARRIVAL.routineWait : undefined} />
+          </Animated.View>
+        )}
       </Pressable>
 
       {words && !next && tag ? (
-        <Pressable
+        <AnimatedPressable
           onPress={onNote}
           accessible={false}
           importantForAccessibility="no"
-          style={[styles.tag, { top: center - 11 }, side === "right" ? { left: x + reach - 4, right: 0 } : { left: 0, right: width - x + reach - 4, alignItems: "flex-end" }]}
+          style={[styles.tag, { top: center - 11 }, side === "right" ? { left: x + reach - 4, right: 0 } : { left: 0, right: width - x + reach - 4, alignItems: "flex-end" }, looks?.label(index)]}
         >
           <MeasuredText
             variant="label"
@@ -354,12 +415,13 @@ function Step({ item, index, width, x, center, cta, words, zigzag, onPress, onNo
           >
             {tag}
           </MeasuredText>
-        </Pressable>
+        </AnimatedPressable>
       ) : null}
 
       {next && cta && !zigzag ? <Bubble label={item.action ?? "Continue"} x={x} top={center - size * 0.5 - 62} onPress={press} /> : null}
 
       {next && (words || (cta && zigzag)) ? (
+        <Animated.View pointerEvents="box-none" style={[StyleSheet.absoluteFill, looks?.words(index)]}>
         <Entrance
           delay={Math.min(index, 6) * 70}
           distance={12}
@@ -420,6 +482,7 @@ function Step({ item, index, width, x, center, cta, words, zigzag, onPress, onNo
             />
           ) : null}
         </Entrance>
+        </Animated.View>
       ) : null}
     </>
   );
@@ -712,9 +775,9 @@ const PULSE = 3600; // ms, the glowing piece of line: 50% .. 100% .. 50%
 const SPARK_LOOP = 7000; // ms between runs of the dark dots
 const SPARK_RUN = 4900; // ms for them to reach the current step
 
-// The values the line's motion runs on, for mascot "title" (flow: the dash offset), "edge" (glow: an
-// opacity) or "ledge" (run: ms into the spark's loop). SVG props can't use the native driver, so flow
-// and run are driven from JS; glow is on a view, so it is native.
+// The values the line's motion runs on, for mascot "edge" (glow: an opacity) or "ledge" (run: ms into
+// the spark's loop). SVG props can't use the native driver, so run is driven from JS; glow is on a
+// view, so it is native. Mascot "title" (the drifting dashes) is DriftingLine's own.
 function useLineMotion(mascot, sparkLength) {
   const flow = useRef(new Animated.Value(0)).current;
   const glow = useRef(new Animated.Value(1)).current;
@@ -726,7 +789,7 @@ function useLineMotion(mascot, sparkLength) {
     run.setValue(0);
     let loop = null;
     if (mascot === "title") {
-      loop = Animated.loop(Animated.timing(flow, { toValue: -14, duration: FLOW, easing: Easing.linear, useNativeDriver: false }));
+      // drawn and moved by DriftingLine
     } else if (mascot === "edge") {
       glow.setValue(0.5);
       loop = Animated.loop(

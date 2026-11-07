@@ -1,3 +1,4 @@
+import uuid
 from datetime import datetime
 from decimal import Decimal
 from typing import Literal, Optional
@@ -97,6 +98,8 @@ class QuizAnswerIn(BaseModel):
 
 class QuizSubmitIn(BaseModel):
     answers: list[QuizAnswerIn]
+    # Optional, sent by current apps: the same id for every try of one chapter submission.
+    submission_id: Optional[uuid.UUID] = None
 
 
 class QuizResultOut(BaseModel):
@@ -136,6 +139,7 @@ class PracticeAnswerIn(BaseModel):
 
 class PracticeSubmitIn(BaseModel):
     answers: list[PracticeAnswerIn]
+    submission_id: Optional[uuid.UUID] = None
 
 
 class PracticeResultOut(BaseModel):
@@ -147,6 +151,7 @@ class PracticeResultOut(BaseModel):
 
 
 class MeStatsOut(BaseModel):
+    name: Optional[str] = None
     xp: Decimal
     weekly_xp: Decimal
     monthly_xp: Decimal

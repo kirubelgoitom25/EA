@@ -16,6 +16,7 @@ import {
   loadChapterQuestions,
   loadProgress,
   saveProgress,
+  submissionIdFor,
   submitChapter,
 } from "../../services/chapterProgress";
 import { feedback, haptic } from "../../services/feedback";
@@ -127,10 +128,16 @@ export default function StageSession({
     return () => clearTimeout(timer);
   }, [answered]);
 
+  // One submit at a time: a double tap must not send the chapter twice.
+  const submitting = useRef(false);
   const submit = useCallback(
     async (allAnswers, done) => {
+      if (submitting.current) return;
+      submitting.current = true;
       setPhase("submitting");
-      const { results, failed, total } = await submitChapter(lesson.id, questions, allAnswers, done);
+      const submissionId = await submissionIdFor(userId, lesson.id);
+      const { results, failed, total } = await submitChapter(lesson.id, questions, allAnswers, done, submissionId);
+      submitting.current = false;
       if (!mounted.current) return;
       setSubmitState({ results, total });
       if (failed.length) {

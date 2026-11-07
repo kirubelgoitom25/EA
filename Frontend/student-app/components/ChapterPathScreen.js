@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -7,6 +7,7 @@ import {
   clearProgress,
   loadChapterQuestions,
   loadProgress,
+  submissionIdFor,
   submitChapter,
 } from "../services/chapterProgress";
 import { fetchLessonActivities } from "../services/api";
@@ -82,9 +83,14 @@ export default function ChapterPathScreen({
 
   // Every stage answered but the chapter wasn't saved (no connection at the
   // time, or the app was closed): save it from here.
+  const savingNow = useRef(false); // a double tap must not send the chapter twice
   const saveChapter = async () => {
+    if (savingNow.current) return;
+    savingNow.current = true;
     setSaving(true);
-    const { failed, total } = await submitChapter(lesson.id, state.questions, state.answers);
+    const submissionId = await submissionIdFor(userId, lesson.id);
+    const { failed, total } = await submitChapter(lesson.id, state.questions, state.answers, {}, submissionId);
+    savingNow.current = false;
     setSaving(false);
     if (failed.length) return;
     await clearProgress(userId, lesson.id);
@@ -237,6 +243,7 @@ export default function ChapterPathScreen({
               if (item.kind === "stage") {
                 const many = stages.length > 1;
                 return {
+                  id: `stage-${lesson.id}-${item.stageIndex}`,
                   status: item.status,
                   type: "questions",
                   kicker: `${item.size} questions`,
@@ -249,6 +256,7 @@ export default function ChapterPathScreen({
               const isVideo = item.kind === "video";
               const { activity } = item.step;
               return {
+                id: `activity-${activity.id}`,
                 status: item.status,
                 type: isVideo ? "video" : "reading",
                 kicker: isVideo ? "Video" : "Reading",

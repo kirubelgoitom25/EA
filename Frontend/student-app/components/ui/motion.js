@@ -1,10 +1,22 @@
 import { useEffect, useState } from "react";
 import { AccessibilityInfo } from "react-native";
 
+// The setting as last read. The phone answers asynchronously, so this is read when the app starts:
+// a screen opened later knows on its first render and never starts something it must not play.
+let lastKnown = false;
+AccessibilityInfo.isReduceMotionEnabled()
+  .then((enabled) => {
+    lastKnown = enabled;
+  })
+  .catch(() => {});
+AccessibilityInfo.addEventListener("reduceMotionChanged", (enabled) => {
+  lastKnown = enabled;
+});
+
 // True when the student has asked the phone to reduce motion. Animated
 // components should then jump straight to their end state.
 export function useReducedMotion() {
-  const [reduceMotion, setReduceMotion] = useState(false);
+  const [reduceMotion, setReduceMotion] = useState(lastKnown);
 
   useEffect(() => {
     let active = true;

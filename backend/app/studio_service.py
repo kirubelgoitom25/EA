@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import HTTPException
-from sqlalchemy import delete, exists, func, select
+from sqlalchemy import delete, exists, func, literal_column, select, union
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -709,16 +709,33 @@ def reorder_activities(db: Session, teacher_id: uuid.UUID, lesson_id: str, ids: 
 # ---- students -----------------------------------------------------------------------------
 
 
-def _is_ready(db: Session, activity: LessonActivity) -> bool:
-    if activity.kind == "quiz":
-        return db.execute(
-            select(func.count(QuizQuestion.id)).where(QuizQuestion.quiz_id == activity.quiz_id)
-        ).scalar_one() > 0
-    if activity.kind == "practice":
-        return db.execute(
-            select(func.count(PracticeItem.id)).where(PracticeItem.practice_id == activity.practice_id)
-        ).scalar_one() > 0
-    return True
+def _not_ready_ids(db: Session, activities) -> set[int]:
+    """Ids of quiz and practice activities with no questions yet, in one query for all."""
+    quiz_ids = {a.quiz_id for a in activities if a.kind == "quiz" and a.quiz_id is not None}
+    practice_ids = {
+        a.practice_id for a in activities if a.kind == "practice" and a.practice_id is not None
+    }
+    filled: set[tuple[str, int]] = set()
+    parts = []
+    if quiz_ids:
+        parts.append(
+            select(literal_column("'quiz'").label("kind"), QuizQuestion.quiz_id.label("ref"))
+            .where(QuizQuestion.quiz_id.in_(quiz_ids))
+        )
+    if practice_ids:
+        parts.append(
+            select(literal_column("'practice'").label("kind"), PracticeItem.practice_id.label("ref"))
+            .where(PracticeItem.practice_id.in_(practice_ids))
+        )
+    if parts:
+        query = parts[0].distinct() if len(parts) == 1 else union(*parts)
+        filled = {(row.kind, row.ref) for row in db.execute(query)}
+    return {
+        a.id
+        for a in activities
+        if (a.kind == "quiz" and ("quiz", a.quiz_id) not in filled)
+        or (a.kind == "practice" and ("practice", a.practice_id) not in filled)
+    }
 
 
 def student_lesson_activities(
@@ -746,6 +763,7 @@ def student_lesson_activities(
             LessonProgress.student_id == student_id, LessonProgress.lesson_id == lesson_id
         )
     ).first() is not None
+    not_ready = _not_ready_ids(db, rows)
     return {
         "lesson_id": lesson_id,
         "lesson_completed": lesson_done,
@@ -757,7 +775,7 @@ def student_lesson_activities(
                 "sort_order": a.sort_order,
                 "is_required": a.is_required,
                 "completed": a.id in done,
-                "ready": _is_ready(db, a),
+                "ready": a.id not in not_ready,
                 "video_url": a.video_url,
                 "reading_body": a.reading_body,
             }

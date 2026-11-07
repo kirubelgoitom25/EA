@@ -1,9 +1,10 @@
 import uuid
-from datetime import date, timedelta
+from datetime import timedelta
 from decimal import Decimal
 
 from sqlalchemy.orm import Session
 
+from app.clock import local_today
 from app.models import Streak, XPEvent
 
 
@@ -20,7 +21,7 @@ def award_xp(
     )
 
     streak = db.get(Streak, student_id)
-    today = date.today()
+    today = local_today()
 
     if streak is None:
         db.add(

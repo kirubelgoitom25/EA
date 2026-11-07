@@ -1,6 +1,7 @@
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse, Response
 
 from app.routers import admin, auth, classes, courses, payments, practice, presence, quiz, stats, students, studio, teacher_content
@@ -10,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.database import get_db
+from app.http_cache import ETagMiddleware
 from app.payment_rules import MAX_PROOF_BYTES
 
 import os
@@ -22,6 +24,10 @@ app = FastAPI(
     redoc_url=None,
     openapi_url=None if IS_PROD else "/openapi.json",
 )
+
+# Middleware added first runs innermost. ETag goes inside CORS so a 304 still carries the
+# CORS headers, and gzip goes outermost so it compresses the final bytes.
+app.add_middleware(ETagMiddleware)
 
 app.add_middleware(
     CORSMiddleware,
@@ -84,6 +90,9 @@ class LimitUploadSize:
 
 
 app.add_middleware(LimitUploadSize)
+
+# JSON compresses about 5x. Small answers and images (already compressed) are left as they are.
+app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=6)
 
 
 @app.exception_handler(RequestValidationError)

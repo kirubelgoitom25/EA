@@ -27,6 +27,7 @@ import ProfileScreen from "./components/ProfileScreen";
 import CoursesScreen from "./components/CoursesScreen";
 import ExploreScreen from "./components/ExploreScreen";
 import CourseScreen from "./components/CourseScreen";
+import { forgetPathMotion } from "./components/ui/pathMotionModel";
 import LockedCourseScreen from "./components/LockedCourseScreen";
 import PurchaseScreen from "./components/PurchaseScreen";
 import PaymentRequestsScreen from "./components/PaymentRequestsScreen";
@@ -51,12 +52,15 @@ import {
   sendPasswordResetCode,
   resetPassword,
   restoreSession,
-  fetchStudent,
+  fetchStats,
+  composeStudent,
   fetchCourses,
   fetchRanking,
   sendHeartbeat,
   fetchLessonActivities,
+  forgetCachedResponses,
 } from "./services/api";
+import { isStale } from "./services/responseCache";
 import { buildSteps } from "./services/activitySteps";
 import { hasSeen, markSeen } from "./services/journey";
 import { chapterWord, isFreshCourse } from "./services/journeyModel";
@@ -71,6 +75,17 @@ import {
 } from "./navigation";
 
 const EMPTY_RANKING = { entries: [], yourPosition: null, yourXp: 0 };
+
+// Moving between screens refreshes server data only when it is older than this. The
+// student's own actions (a submit, Mark complete, a payment) and pull-to-refresh always
+// refresh at once, so their own progress is never behind; other people's changes
+// (classmates' XP, a new course, an approved payment) show within this time.
+const REFRESH_AFTER_MS = 30000;
+
+// Everything the main screens show, in one round of parallel requests.
+function loadAppData(scope, period) {
+  return Promise.all([fetchStats(), fetchCourses(), fetchRanking(scope, period)]);
+}
 
 export default function App() {
   const { colors } = useTheme();
@@ -113,13 +128,23 @@ export default function App() {
   const rankingRequestId = useRef(0);
   const refreshInFlight = useRef(false);
   const refreshQueued = useRef(false);
+  // When server data was last loaded (ms), and the login user, for refreshProgress.
+  const lastRefreshAt = useRef(0);
+  const userRef = useRef(null);
+  // Started at launch alongside the session check, so the data does not wait for it.
+  const prefetched = useRef(null);
 
   useEffect(() => {
     loggedIn.current = !!user;
     currentUserId.current = user?.id ?? null;
+    userRef.current = user;
   }, [user]);
 
   const resetToLogin = useCallback(() => {
+    forgetPathMotion();
+    forgetCachedResponses();
+    lastRefreshAt.current = 0;
+    prefetched.current = null;
     loggedIn.current = false;
     currentUserId.current = null;
     rankingRequestId.current += 1;
@@ -141,14 +166,30 @@ export default function App() {
   useEffect(() => {
     let cancelled = false;
 
+    // With a saved session, start loading the screens' data now, in parallel with the
+    // account check below, instead of after it. If the check fails, the result is dropped.
+    supabase.auth
+      .getSession()
+      .then(({ data: { session } }) => {
+        if (session && !cancelled) {
+          prefetched.current = {
+            userId: session.user?.id,
+            data: loadAppData("class", "weekly").catch(() => null),
+          };
+        }
+      })
+      .catch(() => {});
+
     restoreSession()
       .then((restoredUser) => {
+        if (!restoredUser) prefetched.current = null;
         if (!cancelled && restoredUser) {
           setUser(restoredUser);
           setStack([HOME]);
         }
       })
       .catch((error) => {
+        prefetched.current = null;
         if (error?.accountOff) {
           Alert.alert("Account turned off", error.message);
         }
@@ -202,18 +243,19 @@ export default function App() {
     let cancelled = false;
     setLoadingData(true);
 
-    Promise.all([
-      fetchStudent(),
-      fetchCourses(),
-      fetchRanking(rankingScope, rankingPeriod),
-    ])
-      .then(([studentData, coursesData, rankingData]) => {
+    // Use what launch started loading, if it was for this very student.
+    const early = prefetched.current?.userId === user.id ? prefetched.current.data : null;
+    prefetched.current = null;
+    (early ?? Promise.resolve(null))
+      .then((ready) => ready ?? loadAppData(rankingScope, rankingPeriod))
+      .then(([stats, coursesData, rankingData]) => {
         if (cancelled) {
           return;
         }
-        setStudent(studentData);
+        setStudent(composeStudent(user, stats));
         setCourses(coursesData);
         setRanking(rankingData);
+        lastRefreshAt.current = Date.now();
       })
       .catch((error) => {
         if (cancelled) {
@@ -237,14 +279,17 @@ export default function App() {
   // Ask the server what's true now. XP, streak, ranking and lesson
   // checkmarks all come from the server.
   //
-  // Called after a quiz/practice is recorded, every time the user switches
-  // screens, and on pull-to-refresh. If a refresh is already running, we
-  // remember to run exactly one more when it finishes instead of sending
-  // requests in parallel. A failed refresh keeps what's on screen: it never
-  // clears data or logs the user out.
-  const refreshProgress = useCallback(async () => {
+  // Called with no limit after a quiz/practice is recorded, after Mark complete or a
+  // payment, and on pull-to-refresh: those always refresh. Called with
+  // { ifOlderThan } when switching screens or returning to the app: those refresh only
+  // when the data is older than that. If a refresh is already running, we remember to
+  // run exactly one more when it finishes instead of sending requests in parallel. A
+  // failed refresh keeps what's on screen: it never clears data or logs the user out.
+  const refreshProgress = useCallback(async (options) => {
     const requestedUserId = currentUserId.current;
     if (!requestedUserId) return;
+    const maxAge = options?.ifOlderThan;
+    if (maxAge && (refreshInFlight.current || !isStale(lastRefreshAt.current, maxAge))) return;
     const rankingRequest = ++rankingRequestId.current;
     if (refreshInFlight.current) {
       refreshQueued.current = true;
@@ -253,11 +298,7 @@ export default function App() {
 
     refreshInFlight.current = true;
     try {
-      const [studentData, coursesData, rankingData] = await Promise.all([
-        fetchStudent(),
-        fetchCourses(),
-        fetchRanking(rankingScope, rankingPeriod),
-      ]);
+      const [stats, coursesData, rankingData] = await loadAppData(rankingScope, rankingPeriod);
 
       if (!loggedIn.current) {
         return; // logged out while this was loading
@@ -265,7 +306,8 @@ export default function App() {
 
       if (currentUserId.current !== requestedUserId) return;
 
-      setStudent(studentData);
+      lastRefreshAt.current = Date.now();
+      setStudent(composeStudent(userRef.current, stats));
       setCourses(coursesData);
       if (rankingRequestId.current === rankingRequest) {
         setRanking(rankingData);
@@ -337,10 +379,19 @@ export default function App() {
   const showScreen = (nextStack) => {
     const target = currentScreen(nextStack);
     if (target !== screen && DATA_SCREENS.includes(target)) {
-      refreshProgress();
+      refreshProgress({ ifOlderThan: REFRESH_AFTER_MS });
     }
     setStack(nextStack);
   };
+
+  // Back in the app after a while away: catch up, as switching screens would.
+  useEffect(() => {
+    if (!user) return undefined;
+    const subscription = AppState.addEventListener("change", (state) => {
+      if (state === "active") refreshProgress({ ifOlderThan: REFRESH_AFTER_MS });
+    });
+    return () => subscription.remove();
+  }, [user, refreshProgress]);
 
   // Bottom-nav tabs start a fresh history.
   const goTo = (tab) => showScreen(switchTab(stack, tab));
@@ -485,6 +536,9 @@ export default function App() {
       if (!requestedUserId) return;
       const requestId = ++rankingRequestId.current;
       setRankingPeriod(period);
+      // The class board already carries weekly, monthly and overall XP for everyone, and
+      // the ranking screen orders it for the chosen period itself: nothing to ask.
+      if (rankingScope === "class") return;
       try {
         const result = await fetchRanking(rankingScope, period);
         if (

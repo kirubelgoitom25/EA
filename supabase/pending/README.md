@@ -33,3 +33,25 @@ price, a request or access row exists, or an admin has been set.
 
 `demo_data_cleanup.sql` removes the demo accounts, class and courses. As written it only reports:
 change its last line to `commit` to really delete. Run it before deploying.
+
+# Performance indexes (APPLIED to live 2026-11-07)
+
+`20261107000000_performance_indexes.sql` adds six indexes and changes nothing else: no
+table, column or row. The backend works the same with or without them (only faster with
+them), so it could be applied in any order. Applied 2026-11-07: all six valid, row counts
+of every table unchanged.
+
+`performance_indexes_rollback.sql` drops exactly those six; safe at any time.
+
+# Submission ids (APPLIED to live 2026-11-07, approved by the user)
+
+`20261107010000_submission_ids.sql` makes a chapter submission count once: a nullable
+`client_submission_id` column on `quiz_attempts` and `practice_attempts` (existing rows keep
+NULL; no row is rewritten) and a partial unique index per table over rows that have one.
+
+Applied 2026-11-07 in 197 ms: both columns nullable uuid with no values, both indexes valid,
+existing attempts, XP and streaks identical by checksum. Duplicate protection then verified on
+live inside a rolled-back transaction (13/13 checks). Order was: apply this, then deploy the backend. The new backend also works before it is applied
+for every request that sends no submission id (older apps); only submits from the new app,
+which send one, need the column. `submission_ids_rollback.sql` undoes it (deploy the previous
+backend first).

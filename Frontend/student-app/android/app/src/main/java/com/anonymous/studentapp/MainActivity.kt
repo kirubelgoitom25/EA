@@ -1,5 +1,6 @@
 package com.anonymous.studentapp
 
+import android.content.Intent
 import android.os.Build
 import android.os.Bundle
 
@@ -17,6 +18,16 @@ class MainActivity : ReactActivity() {
     // This is required for expo-splash-screen.
     setTheme(R.style.AppTheme);
     super.onCreate(null)
+  }
+
+  /**
+   * Android can kill the app while the Google sheet is open. The return link then restarts this
+   * activity with its old launcher intent and arrives here before React is ready, so React drops
+   * it. Keeping it as the current intent lets Linking.getInitialURL find it once React starts.
+   */
+  override fun onNewIntent(intent: Intent) {
+    setIntent(intent)
+    super.onNewIntent(intent)
   }
 
   /**

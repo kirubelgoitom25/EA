@@ -1,11 +1,11 @@
 import uuid
-from datetime import date, timedelta
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import bindparam, text
 from sqlalchemy.orm import Session
 
+from app.clock import streak_is_live
 from app.database import get_db
 from app.deps import require_teacher
 from app.schemas import StudentDetailOut, StudentOut
@@ -143,14 +143,9 @@ def get_student(
     ).mappings().first()
 
     # The stored streak is only reset when the student earns XP again, so it
-    # counts only if the last activity was today or yesterday.
-    today = date.today()
-    streak_is_live = (
-        streak is not None
-        and streak["last_activity_date"] is not None
-        and streak["last_activity_date"] >= today - timedelta(days=1)
-    )
-    current_streak = streak["current_streak"] if streak_is_live else 0
+    # counts only if the last activity was today or yesterday (EA's local day).
+    live = streak is not None and streak_is_live(streak["last_activity_date"])
+    current_streak = streak["current_streak"] if live else 0
 
     progress_rows = db.execute(
         COURSE_PROGRESS_QUERY,

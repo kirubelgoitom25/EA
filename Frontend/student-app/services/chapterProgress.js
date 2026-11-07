@@ -6,6 +6,7 @@ import {
   submitPractice,
   submitQuiz,
 } from "./api";
+import { newSubmissionId } from "./ids";
 import {
   buildQuestions,
   combineResults,
@@ -58,10 +59,35 @@ export async function saveProgress(userId, lessonId, progress) {
 
 export async function clearProgress(userId, lessonId) {
   try {
-    await AsyncStorage.removeItem(keyFor(userId, lessonId));
+    await AsyncStorage.multiRemove([keyFor(userId, lessonId), submissionKeyFor(userId, lessonId)]);
   } catch (error) {
     // Ignore.
   }
+}
+
+// ---------- One id per chapter submission ----------
+// Every try of the same submission (a retry after no connection, "Save chapter results"
+// later, even after the app was closed) sends the same id, so the server records the
+// chapter once and awards its XP once. A saved chapter clears it (clearProgress), so
+// practising it again is a new submission with a new id.
+
+const submissionKeyFor = (userId, lessonId) => `ea.chapter.submission.v1.${userId}.${lessonId}`;
+
+export async function submissionIdFor(userId, lessonId) {
+  const key = submissionKeyFor(userId, lessonId);
+  try {
+    const saved = await AsyncStorage.getItem(key);
+    if (saved) return saved;
+  } catch (error) {
+    // Unreadable: a fresh id still protects this try and its retries in this session.
+  }
+  const id = newSubmissionId();
+  try {
+    await AsyncStorage.setItem(key, id);
+  } catch (error) {
+    // Not fatal.
+  }
+  return id;
 }
 
 // Saved progress for many chapters at once (for the course screen).
@@ -90,21 +116,21 @@ export async function loadProgressSummary(userId, lessonIds) {
 // `done` holds parts that already succeeded, so a retry never sends them
 // twice. Returns { results, failed } — failed lists parts to retry.
 
-export async function submitChapter(lessonId, questions, answers, done = {}) {
+export async function submitChapter(lessonId, questions, answers, done = {}, submissionId = null) {
   const { quiz, practice } = toSubmissions(questions, validAnswers(questions, answers));
   const results = { quiz: done.quiz ?? null, practice: done.practice ?? null };
   const failed = [];
 
   if (quiz.length && !results.quiz) {
     try {
-      results.quiz = await submitQuiz(lessonId, quiz);
+      results.quiz = await submitQuiz(lessonId, quiz, submissionId);
     } catch (error) {
       failed.push("quiz");
     }
   }
   if (practice.length && !results.practice) {
     try {
-      results.practice = await submitPractice(lessonId, practice);
+      results.practice = await submitPractice(lessonId, practice, submissionId);
     } catch (error) {
       failed.push("practice");
     }

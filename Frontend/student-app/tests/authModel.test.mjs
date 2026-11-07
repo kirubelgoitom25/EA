@@ -2,8 +2,22 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import {
-  AUTH_REDIRECT, checkEmail, checkPassword, checkSignUp, googleError, isAuthCallback, readCallback, signUpOutcome,
+  AUTH_REDIRECT, callbackLog, checkEmail, checkPassword, checkSignUp, googleError, isAuthCallback, readCallback,
+  signUpOutcome,
 } from "../services/authModel.js";
+
+test("sign-in logs say what happened without ever holding a code", () => {
+  assert.deepEqual(callbackLog(`${AUTH_REDIRECT}?code=secret-code`), { hasCode: true, errorCode: null, error: null });
+  const failed = callbackLog(
+    `${AUTH_REDIRECT}?error=server_error&error_code=unexpected_failure` +
+      "&error_description=Unable+to+exchange+external+code%3A+4%2F0Asecret-code",
+  );
+  assert.deepEqual(failed, {
+    hasCode: false,
+    errorCode: "unexpected_failure",
+    error: "Unable to exchange external code: 4/<hidden>",
+  });
+});
 
 test("with no email provider yet, nothing offers an email code that could never arrive", () => {
   const login = readFileSync(new URL("../components/LoginScreen.js", import.meta.url), "utf8");

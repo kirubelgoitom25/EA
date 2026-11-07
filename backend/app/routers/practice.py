@@ -1,10 +1,13 @@
 import uuid
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
+from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
-from app import studio_sync
+from app import studio_sync, submissions
 from app.access import lesson_is_in_class
 from app.database import get_db
 from app.deps import require_student
@@ -35,7 +38,7 @@ def _get_practice_or_404(db: Session, lesson_id: str) -> Practice:
 
 def _has_completed_before(db: Session, student_id: uuid.UUID, practice_id: int) -> bool:
     return (
-        db.query(PracticeAttempt)
+        db.query(PracticeAttempt.id)
         .filter(
             PracticeAttempt.student_id == student_id,
             PracticeAttempt.practice_id == practice_id,
@@ -80,6 +83,83 @@ def get_practice(
     }
 
 
+# An older app sends no submission id; see quiz.DOUBLE_TAP_SECONDS.
+DOUBLE_TAP_SECONDS = 30
+
+
+def _xp_possible(practice: Practice) -> Decimal:
+    return sum((XP_BY_TYPE[item.type] for item in practice.items), Decimal("0"))
+
+
+def _practice_result(attempt: PracticeAttempt, practice: Practice) -> dict:
+    return {
+        "score": attempt.score,
+        "total_items": attempt.total_items,
+        # Stored as numeric(6,2); practice XP is whole (5 or 10 an item), sent as a fresh
+        # submit sends it, so a retry answers exactly like the first try.
+        "xp_earned": Decimal(attempt.xp_earned).quantize(Decimal("1")),
+        "xp_possible": _xp_possible(practice),
+        "is_first_completion": attempt.is_first_completion,
+    }
+
+
+def _earlier_attempt(db: Session, student_id: uuid.UUID, practice_id: int, submission_id) -> Optional[PracticeAttempt]:
+    query = db.query(PracticeAttempt).filter(
+        PracticeAttempt.student_id == student_id, PracticeAttempt.practice_id == practice_id
+    )
+    if submission_id is not None:
+        found = submissions.find(db, "practice", student_id, practice_id, submission_id)
+        return db.get(PracticeAttempt, found) if found is not None else None
+    since = datetime.now(timezone.utc) - timedelta(seconds=DOUBLE_TAP_SECONDS)
+    return (
+        query.filter(PracticeAttempt.created_at >= since)
+        .order_by(PracticeAttempt.created_at.desc(), PracticeAttempt.id.desc())
+        .first()
+    )
+
+
+def _record_attempt(db, student_id, lesson_id, practice, score, xp_if_correct, submission_id) -> dict:
+    is_first_completion = not _has_completed_before(db, student_id, practice.id)
+    xp_earned = xp_if_correct if is_first_completion else Decimal("0")
+
+    attempt = PracticeAttempt(
+        student_id=student_id,
+        practice_id=practice.id,
+        score=score,
+        total_items=len(practice.items),
+        xp_earned=xp_earned,
+        is_first_completion=is_first_completion,
+    )
+    db.add(attempt)
+    if submission_id is not None:
+        db.flush()
+        submissions.tag(db, "practice", attempt.id, submission_id)
+
+    already_has_progress = (
+        db.query(LessonProgress)
+        .filter(
+            LessonProgress.student_id == student_id,
+            LessonProgress.lesson_id == lesson_id,
+        )
+        .first()
+        is not None
+    )
+    if not already_has_progress:
+        db.add(LessonProgress(student_id=student_id, lesson_id=lesson_id))
+
+    award_xp(db, student_id, xp_earned, "practice", practice.id)
+    studio_sync.record_attempt_progress(db, student_id, lesson_id, "practice")
+    db.commit()
+
+    return {
+        "score": score,
+        "total_items": len(practice.items),
+        "xp_earned": xp_earned,
+        "xp_possible": _xp_possible(practice),
+        "is_first_completion": is_first_completion,
+    }
+
+
 @router.post("/{lesson_id}/practice/submit", response_model=PracticeResultOut)
 def submit_practice(
     lesson_id: str,
@@ -104,7 +184,6 @@ def submit_practice(
     if not submitted_ids or not submitted_ids.issubset(items_by_id.keys()):
         raise HTTPException(status_code=422, detail="Invalid or missing item ids")
 
-    xp_possible = sum((XP_BY_TYPE[item.type] for item in practice.items), Decimal("0"))
     xp_if_correct = Decimal("0")
     score = 0
 
@@ -123,40 +202,19 @@ def submit_practice(
             score += 1
             xp_if_correct += XP_BY_TYPE[item.type]
 
-    is_first_completion = not _has_completed_before(db, student_id, practice.id)
-    xp_earned = xp_if_correct if is_first_completion else Decimal("0")
+    if body.submission_id is not None:
+        earlier = _earlier_attempt(db, student_id, practice.id, body.submission_id)
+        if earlier is not None:
+            return _practice_result(earlier, practice)
 
-    db.add(
-        PracticeAttempt(
-            student_id=student_id,
-            practice_id=practice.id,
-            score=score,
-            total_items=len(practice.items),
-            xp_earned=xp_earned,
-            is_first_completion=is_first_completion,
-        )
-    )
-
-    already_has_progress = (
-        db.query(LessonProgress)
-        .filter(
-            LessonProgress.student_id == student_id,
-            LessonProgress.lesson_id == lesson_id,
-        )
-        .first()
-        is not None
-    )
-    if not already_has_progress:
-        db.add(LessonProgress(student_id=student_id, lesson_id=lesson_id))
-
-    award_xp(db, student_id, xp_earned, "practice", practice.id)
-    studio_sync.record_attempt_progress(db, student_id, lesson_id, "practice")
-    db.commit()
-
-    return {
-        "score": score,
-        "total_items": len(practice.items),
-        "xp_earned": xp_earned,
-        "xp_possible": xp_possible,
-        "is_first_completion": is_first_completion,
-    }
+    for _ in range(2):
+        try:
+            return _record_attempt(
+                db, student_id, lesson_id, practice, score, xp_if_correct, body.submission_id
+            )
+        except IntegrityError:
+            db.rollback()
+            earlier = _earlier_attempt(db, student_id, practice.id, body.submission_id)
+            if earlier is not None:
+                return _practice_result(earlier, practice)
+    raise HTTPException(status_code=409, detail="This chapter is being saved already. Please try again.")

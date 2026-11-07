@@ -19,19 +19,20 @@ Everything that is not allowed answers 404, so a draft and a missing course look
 the same.
 """
 import uuid
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import HTTPException
-from sqlalchemy import and_, exists, or_, select
+from sqlalchemy import DateTime, Integer, String, and_, exists, or_, select, text
 from sqlalchemy.orm import Session
 
+from app import snapshots
 from app.models import (
     ActivityProgress,
     ClassCourse,
     ClassTeacher,
     Course,
-    CourseAccess,
     Lesson,
     LessonActivity,
     LessonProgress,
@@ -118,100 +119,153 @@ def course_of_lesson(db: Session, lesson_id: str) -> Optional[Course]:
     ).scalar_one_or_none()
 
 
-def _progressed_course_ids(db: Session, student_id: uuid.UUID) -> set[str]:
-    by_lesson = select(Module.course_id).join(Lesson, Lesson.module_id == Module.id).join(
-        LessonProgress, LessonProgress.lesson_id == Lesson.id
-    ).where(LessonProgress.student_id == student_id)
+def _progressed_course_ids(db: Session, student_id: uuid.UUID, course_ids) -> set[str]:
+    """Which of these courses the student has any lesson or activity progress in."""
+    by_lesson = (
+        select(Module.course_id)
+        .join(Lesson, Lesson.module_id == Module.id)
+        .join(LessonProgress, LessonProgress.lesson_id == Lesson.id)
+        .where(LessonProgress.student_id == student_id, Module.course_id.in_(course_ids))
+    )
     by_activity = (
         select(Module.course_id)
         .join(Lesson, Lesson.module_id == Module.id)
         .join(LessonActivity, LessonActivity.lesson_id == Lesson.id)
         .join(ActivityProgress, ActivityProgress.activity_id == LessonActivity.id)
-        .where(ActivityProgress.student_id == student_id)
+        .where(ActivityProgress.student_id == student_id, Module.course_id.in_(course_ids))
     )
     return {r[0] for r in db.execute(by_lesson.union(by_activity)).all()}
+
+
+# Everything about the student that decides what they may see and open, in one round trip:
+# the courses their class has and the access rows they hold. The course list also asks for
+# their waiting payment requests. The courses themselves come from the shared catalogue.
+_FACTS_SQL = """
+    select 'class' as kind, course_id,
+           cast(null as timestamptz) as expires_at, cast(null as timestamptz) as revoked_at,
+           0 as waiting
+    from class_courses where class_id = :class_id
+    union all
+    select 'access', course_id, expires_at, revoked_at, 0
+    from course_access where student_id = :student_id
+"""
+_WAITING_SQL = """
+    union all
+    select 'waiting', course_id, null, null, count(*)
+    from payment_requests where student_id = :student_id and status = 'pending'
+    group by course_id
+"""
+_FACT_COLUMNS = dict(
+    kind=String, course_id=String, expires_at=DateTime(timezone=True),
+    revoked_at=DateTime(timezone=True), waiting=Integer,
+)
+FACTS_QUERY = text(_FACTS_SQL).columns(**_FACT_COLUMNS)
+FACTS_WITH_WAITING_QUERY = text(_FACTS_SQL + _WAITING_SQL).columns(**_FACT_COLUMNS)
+
+
+@dataclass(frozen=True)
+class CourseView:
+    """One course as one student meets it. visible: it shows up (with its price). state: one
+    of payment_rules' access states; only OPEN_STATES let them open the content."""
+
+    visible: bool
+    state: str
+    expires_at: Optional[datetime]
+    has_access_row: bool
+    waiting: int = 0
+
+
+def student_course_views(
+    db: Session,
+    student_id: uuid.UUID,
+    class_id: Optional[str],
+    course_ids=None,
+    with_waiting: bool = False,
+    catalog=None,
+) -> dict[str, CourseView]:
+    """{course_id: CourseView} for these courses (default: every course), following the rules
+    at the top of this file. Courses that do not exist are left out. The time always comes
+    from the server, never the phone."""
+    catalog = catalog or snapshots.catalog.get(db)
+    in_class: set[str] = set()
+    held: dict[str, tuple] = {}
+    waiting: dict[str, int] = {}
+    query = FACTS_WITH_WAITING_QUERY if with_waiting else FACTS_QUERY
+    for row in db.execute(query, {"class_id": class_id, "student_id": student_id}):
+        if row.kind == "class":
+            in_class.add(row.course_id)
+        elif row.kind == "access":
+            held[row.course_id] = (row.expires_at, row.revoked_at)
+        else:
+            waiting[row.course_id] = int(row.waiting)
+
+    if course_ids is None:
+        candidates = catalog.courses
+    else:
+        candidates = [catalog.by_id[c] for c in course_ids if c in catalog.by_id]
+
+    # An unpublished course stays visible only to students who already have progress in it.
+    maybe = [c.id for c in candidates if c.owner_id is not None and c.status == "unpublished"]
+    progressed = _progressed_course_ids(db, student_id, maybe) if maybe else set()
+
+    now = datetime.now(timezone.utc)
+    views = {}
+    for course in candidates:
+        row = held.get(course.id)
+        state = access_state(
+            course.price,
+            course.id in in_class,
+            row[0] if row else None,
+            row[1] if row else None,
+            row is not None,
+            now,
+        )
+        owned = course.owner_id is not None
+        visible = (
+            (course.id in in_class and course.status != "draft")
+            or (owned and course.status == "published")
+            or (owned and course.status == "unpublished" and course.id in progressed)
+            # Running access keeps a course visible, so unpublishing never strands a payer.
+            or (row is not None and state == ACTIVE)
+        )
+        views[course.id] = CourseView(
+            visible=visible,
+            state=state,
+            expires_at=row[0] if row else None,
+            has_access_row=row is not None,
+            waiting=waiting.get(course.id, 0),
+        )
+    return views
 
 
 def visible_course_ids_for_student(
     db: Session, student_id: uuid.UUID, class_id: Optional[str]
 ) -> set[str]:
-    visible: set[str] = set()
-
-    if class_id is not None:
-        rows = db.execute(
-            select(Course.id)
-            .join(ClassCourse, ClassCourse.course_id == Course.id)
-            .where(ClassCourse.class_id == class_id, Course.status != "draft")
-        ).all()
-        visible |= {r[0] for r in rows}
-
-    rows = db.execute(
-        select(Course.id).where(Course.owner_id.is_not(None), Course.status == "published")
-    ).all()
-    visible |= {r[0] for r in rows}
-
-    unpublished = {
-        r[0]
-        for r in db.execute(
-            select(Course.id).where(Course.owner_id.is_not(None), Course.status == "unpublished")
-        ).all()
-    }
-    if unpublished:
-        visible |= unpublished & _progressed_course_ids(db, student_id)
-
-    held = access_for_student(db, student_id, class_id)
-    visible |= {course_id for course_id, entry in held.items() if entry["state"] == ACTIVE}
-    return visible
-
-
-def _class_course_ids(db: Session, class_id: Optional[str]) -> set[str]:
-    if class_id is None:
-        return set()
-    rows = db.execute(select(ClassCourse.course_id).where(ClassCourse.class_id == class_id)).all()
-    return {r[0] for r in rows}
+    views = student_course_views(db, student_id, class_id)
+    return {course_id for course_id, view in views.items() if view.visible}
 
 
 def access_for_student(
     db: Session, student_id: uuid.UUID, class_id: Optional[str], course_ids=None
 ) -> dict[str, dict]:
-    """{course_id: {"state", "expires_at"}}, in two queries however many courses.
+    """{course_id: {"state", "expires_at"}}.
 
     With course_ids, those courses. Without, only the courses the student has an access
-    row for. The time always comes from the server, never the phone.
+    row for.
     """
-    now = datetime.now(timezone.utc)
-    rows = select(CourseAccess).where(CourseAccess.student_id == student_id)
-    if course_ids is not None:
-        rows = rows.where(CourseAccess.course_id.in_(course_ids))
-    held = {a.course_id: a for a in db.execute(rows).scalars()}
-    wanted = set(held) if course_ids is None else set(course_ids)
-    if not wanted:
-        return {}
-    prices = dict(db.execute(select(Course.id, Course.price).where(Course.id.in_(wanted))).all())
-    in_class = _class_course_ids(db, class_id)
-
-    out = {}
-    for course_id, price in prices.items():
-        row = held.get(course_id)
-        out[course_id] = {
-            "state": access_state(
-                price,
-                course_id in in_class,
-                row.expires_at if row else None,
-                row.revoked_at if row else None,
-                row is not None,
-                now,
-            ),
-            "expires_at": row.expires_at if row else None,
-        }
-    return out
+    views = student_course_views(db, student_id, class_id, course_ids)
+    return {
+        course_id: {"state": view.state, "expires_at": view.expires_at}
+        for course_id, view in views.items()
+        if course_ids is not None or view.has_access_row
+    }
 
 
 def student_can_open_course(
     db: Session, student_id: uuid.UUID, class_id: Optional[str], course_id: str
 ) -> bool:
-    entry = access_for_student(db, student_id, class_id, [course_id]).get(course_id)
-    return entry is not None and entry["state"] in OPEN_STATES
+    view = student_course_views(db, student_id, class_id, [course_id]).get(course_id)
+    return view is not None and view.state in OPEN_STATES
 
 
 def visible_course_ids_for_teacher(db: Session, teacher_id: uuid.UUID) -> set[str]:
@@ -227,18 +281,11 @@ def visible_course_ids_for_teacher(db: Session, teacher_id: uuid.UUID) -> set[st
 def student_can_see_lesson(
     db: Session, student_id: uuid.UUID, class_id: Optional[str], lesson_id: str
 ) -> bool:
-    row = db.execute(
-        select(Module.course_id)
-        .join(Lesson, Lesson.module_id == Module.id)
-        .where(
-            Lesson.id == lesson_id,
-            Lesson.archived_at.is_(None),
-            Module.archived_at.is_(None),
-        )
-    ).first()
-    if row is None:
+    # Archived lessons and lessons of archived modules are not in the catalogue.
+    catalog = snapshots.catalog.get(db)
+    course_id = catalog.course_of_lesson(lesson_id)
+    if course_id is None:
         return False
     # Every lesson route comes through here, so this one check guards all paid content.
-    return row[0] in visible_course_ids_for_student(
-        db, student_id, class_id
-    ) and student_can_open_course(db, student_id, class_id, row[0])
+    view = student_course_views(db, student_id, class_id, [course_id], catalog=catalog).get(course_id)
+    return view is not None and view.visible and view.state in OPEN_STATES

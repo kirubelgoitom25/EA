@@ -73,7 +73,8 @@ const TRACKS = {
   dip: track(0, [3030, 0], [3180, 4, OUT], [3480, -1, IN_OUT], [3720, 0, IN_OUT]),
 };
 
-export default function Rock({ status = "todo", size = 84, icon, children, ring = false, pressed = false }) {
+// wait: ms before the current step's routine first plays.
+export default function Rock({ status = "todo", size = 84, icon, children, ring = false, pressed = false, wait = 1200 }) {
   const look = LOOKS[status] ?? LOOKS.todo;
   const box = rockBox(size);
   const k = size / 84; // everything in the spec is for an 84 dp key
@@ -88,12 +89,12 @@ export default function Rock({ status = "todo", size = 84, icon, children, ring 
     if (!ring || reduce || stopped.current) return undefined;
     t.setValue(0);
     routine.current = Animated.sequence([
-      Animated.delay(1200), // let the screen's arrival settle first, so nothing else moves with it
+      Animated.delay(wait), // let the screen's arrival settle first, so nothing else moves with it
       Animated.loop(Animated.timing(t, { toValue: LOOP, duration: LOOP, easing: Easing.linear, useNativeDriver: true })),
     ]);
     routine.current.start();
     return () => routine.current?.stop();
-  }, [ring, reduce, t]);
+  }, [ring, reduce, t, wait]);
 
   // The press: sinks in 80 ms, springs back on release. A tap stops the routine where it is and
   // puts the key at rest first.

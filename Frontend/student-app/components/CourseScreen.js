@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { Pressable, ScrollView, StyleSheet, View, useWindowDimensions } from "react-native";
+import { Animated, Pressable, ScrollView, StyleSheet, View, useWindowDimensions } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -13,6 +13,7 @@ import BottomNavBar from "./BottomNavBar";
 import JourneyMoment from "./JourneyMoment";
 import { firstOpenChapter, flattenChapters } from "./session/sessionModel";
 import AppText from "./ui/AppText";
+import { useArrival } from "./ui/arrival";
 import { FoxFigure } from "./ui/CourseFox";
 import Button from "./ui/Button";
 import DotGrid from "./ui/DotGrid";
@@ -20,6 +21,7 @@ import Emblem from "./ui/Emblem";
 import EmptyState from "./ui/EmptyState";
 import { LEDGE_FOX, scaleOf } from "./ui/foxPlacement";
 import { useFoxReact } from "./ui/FoxContext";
+import { ARRIVAL } from "./ui/pathMotionModel";
 import ProgressBar from "./ui/ProgressBar";
 import Route, { routeMetrics } from "./ui/Route";
 import { NAV_BAR_HEIGHT, TAB_BAR_HEIGHT } from "./ui/Screen";
@@ -50,6 +52,7 @@ export default function CourseScreen({
   const scroll = useRef(null);
   const { width: screenWidth, height: screenHeight } = useWindowDimensions();
   const reduce = useReducedMotion();
+  const arrival = useArrival(course.id); // the first open in a session plays its arrival
   const [scrolled, setScrolled] = useState(false);
   const [away, setAway] = useState(null); // "above" / "below": your chapter is out of view
   const chapters = flattenChapters(course);
@@ -109,6 +112,7 @@ export default function CourseScreen({
     const stages = partial && partial.stageCount ? `${partial.stagesDone} of ${partial.stageCount} stages` : null;
     const caption = status === "done" ? "Done" : stages ?? `Chapter ${number}`;
     return {
+      id: `chapter-${chapter.id}`,
       status,
       number,
       eyebrow: showParts && firstOfModule.has(chapter.id) ? moduleOf[chapter.id] : undefined,
@@ -125,16 +129,39 @@ export default function CourseScreen({
   // A long path scrolls to the chapter you're on, so it is the first thing you see. A short one
   // already fits, and its header stays in view.
   const routeTop = useRef(0);
+  // How far the page has scrolled past the top of the route, for the route's moving line.
+  const routeScroll = useRef(new Animated.Value(0)).current;
   const scrolledToNow = useRef(false);
   const nodeY = () => routeTop.current + routeMetrics(items, true).centers[nextIndex];
+  // Where that leaves the page.
+  const landingY = () => {
+    if (nextIndex < 0) return 0;
+    const stopY = routeTop.current + routeMetrics(items, true).offsets[nextIndex];
+    return stopY + 170 > screenHeight - 220 ? Math.max(0, stopY - screenHeight * 0.28) : 0;
+  };
   const scrollToNow = () => {
     if (scrolledToNow.current || nextIndex < 0 || !scroll.current) return;
     scrolledToNow.current = true;
-    const stopY = routeTop.current + routeMetrics(items, true).offsets[nextIndex];
-    if (stopY + 170 > screenHeight - 220) {
-      setTimeout(() => scroll.current?.scrollTo({ y: Math.max(0, stopY - screenHeight * 0.28), animated: true }), 500);
-    }
+    const y = landingY();
+    if (y > 0) setTimeout(() => scroll.current?.scrollTo({ y, animated: true }), 500);
   };
+
+  // The arrival plays what will be in view once the page has landed.
+  const startArrival = () => {
+    const { centers, den, total: height } = routeMetrics(items, true);
+    const landing = landingY();
+    const top = landing - routeTop.current;
+    arrival?.start({
+      stops: [...centers, den.center],
+      top,
+      bottom: top + screenHeight - TAB_BAR_HEIGHT - insets.bottom,
+      total: height,
+      lead: landing > 0 ? ARRIVAL.scrollLead : ARRIVAL.lead,
+    });
+  };
+  useEffect(() => {
+    if (total === 0) arrival?.start({ stops: [], top: 0, bottom: 0, total: 0 });
+  }, [total, arrival]);
 
   // Is your chapter out of view? Then a pill says which way it is, and takes you there.
   const checkAway = (offset, viewHeight) => {
@@ -151,13 +178,15 @@ export default function CourseScreen({
     <View style={styles.root}>
       {/* "ledge": the fox stands on the tab bar, drawn under the page so the path scrolls over her */}
       {mascotVariant === "ledge" ? (
-        <FoxFigure
-          spec={LEDGE_FOX}
-          k={scaleOf(screenWidth)}
-          motion="sway"
-          reduce={reduce}
-          style={{ position: "absolute", left: LEDGE_FOX.left * scaleOf(screenWidth), bottom: NAV_BAR_HEIGHT + insets.bottom }}
-        />
+        <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, arrival?.looks.fox]}>
+          <FoxFigure
+            spec={LEDGE_FOX}
+            k={scaleOf(screenWidth)}
+            motion="sway"
+            reduce={reduce}
+            style={{ position: "absolute", left: LEDGE_FOX.left * scaleOf(screenWidth), bottom: NAV_BAR_HEIGHT + insets.bottom }}
+          />
+        </Animated.View>
       ) : null}
       <ScrollView
         ref={scroll}
@@ -166,12 +195,13 @@ export default function CourseScreen({
         onScroll={(event) => {
           scrim(event);
           checkAway(event.nativeEvent.contentOffset.y, event.nativeEvent.layoutMeasurement.height);
+          routeScroll.setValue(event.nativeEvent.contentOffset.y - routeTop.current);
         }}
         scrollEventThrottle={32}
       >
         <DotGrid />
 
-        <View style={[styles.header, { paddingTop: insets.top + 60 }]}>
+        <Animated.View style={[styles.header, { paddingTop: insets.top + 60 }, arrival?.looks.header]}>
           <Emblem course={course} size={48} radius={15} />
           <View style={styles.titleBlock}>
             <AppText variant="title" numberOfLines={2} style={styles.title}>
@@ -183,6 +213,7 @@ export default function CourseScreen({
                 height={5}
                 fill={stone.moss}
                 track={stone.rockLight}
+                intro={arrival ? ARRIVAL.bar : undefined}
                 accessibilityLabel={`${doneCount} of ${total} ${chapterWord(total)} done`}
               />
             ) : null}
@@ -195,7 +226,7 @@ export default function CourseScreen({
               </Pressable>
             ) : null}
           </View>
-        </View>
+        </Animated.View>
 
         {total === 0 ? (
           <EmptyState title="No chapters yet" message="Chapters will appear here soon." />
@@ -204,13 +235,18 @@ export default function CourseScreen({
             style={styles.route}
             onLayout={(event) => {
               routeTop.current = event.nativeEvent.layout.y;
+              routeScroll.setValue(-routeTop.current);
               scrollToNow();
               checkAway(0, screenHeight);
+              startArrival();
             }}
           >
             <Route
               items={items}
               mascot={mascotVariant}
+              arrival={arrival}
+              scrollY={routeScroll}
+              viewHeight={screenHeight}
               foxKey={`course-${course.id}`}
               den={{
                 reached: finished,

@@ -5,6 +5,8 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from app import snapshots
+from app.clock import streak_is_live
 from app.database import get_db
 from app.deps import require_student
 from app.models import Streak
@@ -32,19 +34,6 @@ CLASS_RANKING_QUERY = """
     group by p.id, p.name
     order by xp desc, p.name asc
 """
-
-RANKING_QUERY = """
-    select p.id, p.name,
-           coalesce(sum(x.amount), 0) as xp,
-           coalesce(sum(x.amount) filter (where x.created_at >= now() - interval '7 days'), 0) as weekly_xp,
-           coalesce(sum(x.amount) filter (where x.created_at >= now() - interval '30 days'), 0) as monthly_xp
-    from public.profiles p
-    left join public.xp_events x on x.student_id = p.id
-    where p.role = 'student' and p.is_active
-    group by p.id, p.name
-    order by xp desc, p.name asc
-"""
-
 
 # Only this many students are listed nationally, plus the student asking.
 NATIONAL_TOP = 50
@@ -85,6 +74,24 @@ def national_board(rows, my_id: str, period: str) -> list[dict]:
     return board
 
 
+def _national_rows(db: Session, current_user: dict) -> list:
+    """Every active student's XP totals. Shared by all students and rebuilt after any new
+    XP or profile change (see snapshots), except the asking student's own row, which is
+    always read fresh: their own XP and position are never behind."""
+    me = uuid.UUID(current_user["id"])
+    mine = db.execute(text(STATS_QUERY), {"student_id": me}).mappings().first()
+    others = [row for row in snapshots.national_totals.get(db) if row["id"] != me]
+    return others + [
+        {
+            "id": me,
+            "name": current_user["name"],
+            "xp": mine["total_xp"],
+            "weekly_xp": mine["weekly_xp"],
+            "monthly_xp": mine["monthly_xp"],
+        }
+    ]
+
+
 @router.get("/me/stats", response_model=MeStatsOut)
 def get_my_stats(current_user: dict = Depends(require_student), db: Session = Depends(get_db)):
     student_id = uuid.UUID(current_user["id"])
@@ -92,10 +99,16 @@ def get_my_stats(current_user: dict = Depends(require_student), db: Session = De
     streak = db.get(Streak, student_id)
 
     return {
+        # The name rides along so the app needs no separate /auth/me to refresh.
+        "name": current_user["name"],
         "xp": row["total_xp"],
         "weekly_xp": row["weekly_xp"],
         "monthly_xp": row["monthly_xp"],
-        "current_streak": streak.current_streak if streak else 0,
+        # Same rule teachers see: a streak whose last day was before yesterday has ended,
+        # even though the stored number is only reset at the next XP.
+        "current_streak": streak.current_streak
+        if streak and streak_is_live(streak.last_activity_date)
+        else 0,
         "longest_streak": streak.longest_streak if streak else 0,
     }
 
@@ -117,8 +130,7 @@ def get_ranking(
             return []
         rows = db.execute(text(CLASS_RANKING_QUERY), {"class_id": class_id}).mappings().all()
     else:
-        rows = db.execute(text(RANKING_QUERY)).mappings().all()
-        return national_board(rows, current_user["id"], period)
+        return national_board(_national_rows(db, current_user), current_user["id"], period)
 
     return [
         {
