@@ -13,10 +13,12 @@ class Settings(BaseSettings):
     # The calendar day streaks count in (see app/clock.py).
     app_timezone: str = "Africa/Addis_Ababa"
     # Students sign up with a phone and username. Supabase still needs an email for every
-    # account, so each student gets a hidden internal address on this domain. It must be a
-    # domain EA controls, with a null MX record so no mail is ever delivered. Empty means
-    # student registration is off (the route answers 503).
-    student_email_domain: str = ""
+    # account, so each student gets a hidden internal address on this domain. The default is
+    # under ".invalid", a name reserved by RFC 2606/6761 that can never exist, so mail to these
+    # addresses can never reach anyone and nothing has to be bought. Supabase's admin "create
+    # user" checks only the address format (no DNS). Set it empty to turn registration off
+    # (the route then answers 503). Never change it once students exist: their logins use it.
+    student_email_domain: str = "students.ea.invalid"
     # Signs the stand-in login addresses for unknown phones and usernames, so the login
     # form never reveals which accounts exist. Falls back to the service key.
     login_lookup_secret: str = ""

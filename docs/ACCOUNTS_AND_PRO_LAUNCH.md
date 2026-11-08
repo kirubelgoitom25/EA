@@ -4,11 +4,14 @@ Phone + username sign-up, EA Pro, and Free / Paid / Pro courses. Code is built a
 nothing is applied, deployed or pushed. Work top to bottom. Steps 1 to 3 happen on a **test**
 Supabase project, never the live one.
 
-## 0. Decide the internal email domain
+## 0. The internal email domain (nothing to buy)
 
-Every student account has a hidden address `s.<random>@<domain>`. The domain must be one EA controls,
-so no mail can ever reach a stranger. Pick a subdomain, for example `accounts.<your-domain>`, and add
-a **null MX** record for it (`MX 0 .`, RFC 7505), so any mail sent to it is refused at once.
+Every student account has a hidden address `s.<random>@students.ea.invalid`. `.invalid` is reserved
+by RFC 2606 and RFC 6761: it can never be registered or resolve, so mail to it can never reach
+anyone. Supabase's admin "create user" checks only the address format (supabase/auth
+`validateEmail`: length and `checkmail.ValidateFormat`, no DNS), and creating a user sends no mail.
+It is the backend's default (`STUDENT_EMAIL_DOMAIN`); set it empty to close registration. Never
+change it once students exist: their logins use it.
 
 ## 1. Test project setup
 
