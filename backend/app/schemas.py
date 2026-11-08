@@ -87,6 +87,8 @@ class CourseListItemOut(BaseModel):
     access_days: Optional[int] = None
     payment_instructions: Optional[str] = None
     access_tier: str = "free"
+    # A paid course that EA Pro members also open.
+    pro_included: bool = False
     purchasable: bool = True
     # Students only. Absent for teachers, who are not buying anything.
     access: Optional[CourseAccessOut] = None
@@ -102,6 +104,8 @@ class CourseDetailOut(BaseModel):
     access_days: Optional[int] = None
     payment_instructions: Optional[str] = None
     access_tier: str = "free"
+    # A paid course that EA Pro members also open.
+    pro_included: bool = False
     purchasable: bool = True
     access: Optional[CourseAccessOut] = None
     modules: list[ModuleOut]

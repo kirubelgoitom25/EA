@@ -19,11 +19,15 @@ import { ConfirmDialog, ErrorNote } from "./Parts.jsx";
 
 const isPaid = (course) => tierOf(course) === "paid";
 
+// Keys are "from>to", where a paid course included in EA Pro reads as "paid+pro".
 const STRICTER_TEXT = {
   "free>paid": ["Start charging for this course?", "Set price", "Students who have not started will need to pay, even if they already added this course on their phone."],
+  "free>paid+pro": ["Start charging for this course?", "Set price", "Students who have not started will need to pay or have EA Pro, even if they already added this course on their phone."],
   "free>pro": ["Make this a Pro course?", "Make Pro", "Students who have not started will need EA Pro to open it."],
   "pro>paid": ["Start charging for this Pro course?", "Set price", "Pro members who have not started will need to buy it."],
+  "paid+pro>paid": ["Take this course out of EA Pro?", "Take out of Pro", "Pro members who have not started will need to buy it."],
 };
+const optionKey = (tier, proIncluded) => (tier === "paid" && proIncluded ? "paid+pro" : tier);
 
 // Free, paid (price, duration and how to pay) or Pro. A course with no owner stays free.
 export function PricingCard({ course, busy, onSave, setDirty }) {
@@ -33,17 +37,20 @@ export function PricingCard({ course, busy, onSave, setDirty }) {
   const [duration, setDuration] = useState(durationKey(course.access_days));
   const [customDays, setCustomDays] = useState(course.access_days ? String(course.access_days) : "");
   const [instructions, setInstructions] = useState(course.payment_instructions ?? "");
+  const savedPro = Boolean(course.pro_included);
+  const [proIncluded, setProIncluded] = useState(savedPro);
   const [confirming, setConfirming] = useState(false);
   const [learners, setLearners] = useState(null);
 
   const paid = tier === "paid";
-  const check = pricingCheck({ tier, price, duration, customDays, instructions });
+  const check = pricingCheck({ tier, price, duration, customDays, instructions, proIncluded });
   const savedDays = course.access_days ?? null;
   const changed =
     tier !== saved ||
     (paid &&
       (Number(price) !== Number(course.price) ||
         check.values?.access_days !== savedDays ||
+        proIncluded !== savedPro ||
         instructions.trim() !== (course.payment_instructions ?? "")));
 
   useEffect(() => {
@@ -61,8 +68,8 @@ export function PricingCard({ course, busy, onSave, setDirty }) {
   }
 
   const save = () => onSave(check.values);
-  const stricter = isStricter(saved, tier);
-  const text = STRICTER_TEXT[`${saved}>${tier}`];
+  const stricter = isStricter(saved, tier, savedPro, paid && proIncluded);
+  const text = STRICTER_TEXT[`${optionKey(saved, savedPro)}>${optionKey(tier, paid && proIncluded)}`];
 
   const submit = async (event) => {
     event.preventDefault();
@@ -130,6 +137,15 @@ export function PricingCard({ course, busy, onSave, setDirty }) {
             />
           </label>
           <p className="sub">Students see this before paying. Access starts when you approve their payment.</p>
+          <label className="choice">
+            <input type="checkbox" checked={proIncluded} onChange={(e) => setProIncluded(e.target.checked)} />{" "}
+            Also include in EA Pro
+          </label>
+          <p className="sub">
+            {proIncluded
+              ? "EA Pro members open it without buying. Everyone else can still buy it from you."
+              : "Only students who buy it can open it."}
+          </p>
         </>
       )}
 

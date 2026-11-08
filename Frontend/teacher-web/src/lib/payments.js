@@ -51,13 +51,19 @@ export const TIER_LABEL = { free: "Free", paid: "Paid", pro: "Pro" };
 // Older answers have no access_tier: the price decides, as it always did.
 export const tierOf = (course) => course?.access_tier ?? (Number(course?.price) > 0 ? "paid" : "free");
 
-// Moving along one of these makes a course harder to open, so students who started keep it.
-const STRICTER = new Set(["free>paid", "free>pro", "pro>paid"]);
-export const isStricter = (from, to) => STRICTER.has(`${from}>${to}`);
+// Whether EA Pro opens a course: Pro courses, and paid courses their owner included in Pro.
+export const opensWithPro = (tier, proIncluded = false) => tier === "pro" || (tier === "paid" && Boolean(proIncluded));
+
+// A change that closes the course to someone who could open it, so students who started keep it.
+// Same rule as the server (payment_rules.is_stricter). Purchases open every option.
+export function isStricter(fromTier, toTier, fromPro = false, toPro = false) {
+  if (fromTier === "free") return toTier !== "free";
+  return opensWithPro(fromTier, fromPro) && !opensWithPro(toTier, toPro) && toTier !== "free";
+}
 
 // Checks the pricing form and builds what to send. Returns { ok, reason, values }.
 // With tier, the server is told the access option; without it (older callers), paid decides.
-export function pricingCheck({ tier, paid, price, duration, customDays, instructions }) {
+export function pricingCheck({ tier, paid, price, duration, customDays, instructions, proIncluded = false }) {
   const chosen = tier ?? (paid ? "paid" : "free");
   if (chosen !== "paid") {
     return { ok: true, reason: "", values: tier ? { access_tier: chosen } : { price: "0" } };
@@ -83,7 +89,11 @@ export function pricingCheck({ tier, paid, price, duration, customDays, instruct
   const text = (instructions ?? "").trim();
   if (!text) return { ok: false, reason: "Tell students how to pay you." };
   const values = { price: String(price).trim(), access_days: days, payment_instructions: text };
-  return { ok: true, reason: "", values: tier ? { access_tier: "paid", ...values } : values };
+  return {
+    ok: true,
+    reason: "",
+    values: tier ? { access_tier: "paid", ...values, pro_included: Boolean(proIncluded) } : values,
+  };
 }
 
 // A request is for a course or for a Pro plan.

@@ -56,6 +56,7 @@ from app.models import (  # noqa: E402
     StudentProfile,
 )
 from app.payment_rules import (  # noqa: E402
+    is_stricter,
     ACTIVE,
     CLASS,
     EXPIRED,
@@ -173,6 +174,34 @@ class AccessRuleWithPro(unittest.TestCase):
         for purchase, pro in itertools.product(PURCHASES, (False, True)):
             self.assertEqual(self.state("free", purchase, pro), FREE)
             self.assertEqual(self.state("pro", purchase, pro, in_class=True), CLASS)
+
+    def test_paid_and_included_in_pro(self):
+        for purchase in PURCHASES:
+            has_row, expires_at, revoked_at = purchase
+            running = has_row and revoked_at is None and (expires_at is None or expires_at > NOW)
+            with_pro = access_state(Decimal("100"), False, expires_at, revoked_at, has_row, NOW,
+                                    tier="paid", pro_active=True, pro_included=True)
+            without_pro = access_state(Decimal("100"), False, expires_at, revoked_at, has_row, NOW,
+                                       tier="paid", pro_active=False, pro_included=True)
+            # Without Pro it is exactly a paid course.
+            self.assertEqual(without_pro, self.state("paid", purchase, False), purchase)
+            # A purchase always reads as the purchase; Pro opens it for everyone else.
+            self.assertEqual(with_pro, ACTIVE if running else PRO, purchase)
+
+    def test_which_changes_keep_existing_learners(self):
+        stricter = [
+            ("free", False, "paid", False), ("free", False, "pro", False), ("free", False, "paid", True),
+            ("pro", False, "paid", False), ("paid", True, "paid", False),
+        ]
+        looser = [
+            ("paid", False, "pro", False), ("paid", False, "paid", True), ("paid", True, "pro", False),
+            ("pro", False, "paid", True), ("pro", False, "free", False), ("paid", True, "free", False),
+            ("paid", False, "free", False), ("paid", False, "paid", False),
+        ]
+        for change in stricter:
+            self.assertTrue(is_stricter(*change), change)
+        for change in looser:
+            self.assertFalse(is_stricter(*change), change)
 
     def test_older_callers_without_a_tier_are_unchanged(self):
         self.assertEqual(access_state(Decimal("0"), False, None, None, False, NOW), FREE)
@@ -323,6 +352,61 @@ class PurchasesNeverDependOnPro(ProCase):
         studio_service.update_course(self.db, self.owner.id, course_id, {"access_tier": "pro"})
         self.assertEqual(self.state(course_id=course_id), ACTIVE)
         self.assertEqual(self.state(self.classmate, course_id), PRO_LOCKED)
+
+
+class PaidAndPro(ProCase):
+    """A teacher can make a course paid and also include it in EA Pro."""
+
+    def setUp(self):
+        super().setUp()
+        studio_service.update_course(self.db, self.owner.id, self.course_id, {"pro_included": True})
+
+    def test_pro_opens_it_and_others_can_buy_it(self):
+        self.assertEqual(self.state(), LOCKED)
+        self.give_pro()
+        self.assertEqual(self.state(), PRO)
+        self.assertTrue(self.can_open())
+        self.end_pro()
+        self.assertEqual(self.state(), LOCKED)
+        self.assertFalse(self.can_open())
+
+    def test_still_for_sale(self):
+        from app.routers.courses import _student_courses
+
+        listed = {c["id"]: c for c in _student_courses(self.db, {"id": str(self.student.id), "class_id": None})}
+        course = listed[self.course_id]
+        self.assertEqual((course["access_tier"], course["pro_included"], course["purchasable"]), ("paid", True, True))
+        payment_service.submit_request(self.db, self.student.id, None, self.course_id, PNG)
+
+    def test_a_purchase_survives_pro_ending(self):
+        self.buy()
+        before = self.access_rows()
+        self.give_pro()
+        self.assertEqual(self.state(), ACTIVE)  # the purchase, not Pro
+        admin_service.revoke_pro(self.db, self.admin.id, self.student.id)
+        self.assertEqual(self.state(), ACTIVE)
+        self.assertTrue(self.can_open())
+        self.assertEqual(self.access_rows(), before)
+
+    def test_pro_members_who_started_keep_it_when_pro_is_taken_off(self):
+        self.give_pro()
+        self.db.add(LessonProgress(student_id=self.student.id, lesson_id=self.lesson_id))
+        self.db.commit()
+        out = studio_service.update_course(self.db, self.owner.id, self.course_id, {"pro_included": False})
+        self.assertFalse(out["pro_included"])
+        self.end_pro()
+        self.assertEqual(self.access_row().source, "existing_learner")
+        self.assertTrue(self.can_open())
+
+    def test_only_paid_courses_can_be_included(self):
+        with self.assertRaises(HTTPException):
+            studio_service.update_course(self.db, self.owner.id, self.pro_course, {"pro_included": True})
+        out = studio_service.update_course(self.db, self.owner.id, self.course_id, {"access_tier": "pro"})
+        self.assertFalse(out["pro_included"])  # leaving paid clears it
+
+    def test_switching_to_free_clears_it(self):
+        out = studio_service.update_course(self.db, self.owner.id, self.course_id, {"access_tier": "free"})
+        self.assertEqual((out["access_tier"], out["pro_included"]), ("free", False))
 
 
 class CourseTiers(ProCase):
@@ -791,6 +875,10 @@ class MigrationText(unittest.TestCase):
         sql = self.read("20261108000000_accounts_and_pro.sql")
         body = sql[sql.index("-- 5. Pro plans"):]
         self.assertNotIn("course_access", body.replace("kept like course_access", ""))
+
+    def test_only_a_paid_course_can_be_included_in_pro(self):
+        sql = self.read("20261108000000_accounts_and_pro.sql")
+        self.assertIn("check (not pro_included or access_tier = 'paid')", sql)
 
     def test_new_tables_are_backend_only(self):
         sql = self.read("20261108000000_accounts_and_pro.sql")

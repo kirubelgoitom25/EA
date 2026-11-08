@@ -48,13 +48,13 @@ from app.models import (
 )
 from app.payment_rules import (
     SOURCE_EXISTING,
-    STRICTER,
     TIER_FREE,
     TIER_PAID,
     clean_access_days,
     clean_instructions,
     clean_price,
     clean_tier,
+    is_stricter,
 )
 from app.studio_rules import (
     DRAFT,
@@ -142,6 +142,7 @@ def _course_out(course: Course, teacher_id: uuid.UUID, editable: bool) -> dict:
         "access_days": course.access_days,
         "payment_instructions": course.payment_instructions,
         "access_tier": course.access_tier,
+        "pro_included": bool(course.pro_included),
         "owner_id": str(course.owner_id) if course.owner_id else None,
         "published_at": course.published_at,
         "created_at": course.created_at,
@@ -266,8 +267,12 @@ def update_course(db: Session, teacher_id: uuid.UUID, course_id: str, values: di
     if "description" in values:
         changes["description"] = clean_description(values["description"])
     changes.update(_pricing_changes(course, values))
-    before = course.access_tier
-    stricter = (before, changes.get("access_tier", before)) in STRICTER
+    stricter = is_stricter(
+        course.access_tier,
+        bool(course.pro_included),
+        changes.get("access_tier", course.access_tier),
+        changes.get("pro_included", bool(course.pro_included)),
+    )
     with transaction(db):
         for field, value in changes.items():
             setattr(course, field, value)
@@ -284,6 +289,7 @@ def _pricing_changes(course: Course, values: dict) -> dict:
     """The pricing fields that were sent, checked together with what is already saved.
 
     access_tier decides: free and pro courses have no price, a paid course must have one.
+    A paid course can also be included in EA Pro (pro_included); other options never are.
     A client that sends only a price (older dashboards) gets paid for a price above 0 and
     free for 0, as before.
     """
@@ -302,7 +308,17 @@ def _pricing_changes(course: Course, values: dict) -> dict:
         )
     else:
         tier = course.access_tier
-    if not changes and tier == course.access_tier:
+    if tier != TIER_PAID:
+        if values.get("pro_included") is True:
+            raise ContentError("Only a paid course can also be included in EA Pro")
+        included = False
+    elif values.get("pro_included") is not None:
+        if not isinstance(values["pro_included"], bool):
+            raise ContentError("pro_included must be true or false")
+        included = values["pro_included"]
+    else:
+        included = bool(course.pro_included)
+    if not changes and tier == course.access_tier and included == bool(course.pro_included):
         return changes
 
     if tier != TIER_FREE and course.owner_id is None:
@@ -322,6 +338,8 @@ def _pricing_changes(course: Course, values: dict) -> dict:
         changes["price"] = clean_price(0)
     if tier != course.access_tier:
         changes["access_tier"] = tier
+    if included != bool(course.pro_included):
+        changes["pro_included"] = included
     return changes
 
 

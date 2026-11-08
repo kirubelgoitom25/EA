@@ -189,15 +189,16 @@ Every course is `free`, `paid` or `pro`. Only a paid course has a price (a datab
 |---|---|
 | `free` | Always |
 | any, given to the student's class | Always |
-| `paid` | The student holds running `course_access` (bought, kept as an existing learner, or given by the admin). Pro never opens or closes a paid course |
+| `paid` | The student holds running `course_access` (bought, kept as an existing learner, or given by the admin). Pro never closes a paid course, and opens it only when the owner set `pro_included` |
+| `paid` with `pro_included` | Running `course_access` first, then an active EA Pro membership. Still for sale to everyone else |
 | `pro` | Running `course_access` first, then an active EA Pro membership. Pro ending falls back to the purchase; it never removes it |
 
-Changing to a stricter option (free to paid, free to pro, pro to paid) gives students with recorded
-progress a permanent `existing_learner` row. A Pro course cannot be bought on its own (409).
+Changing to a stricter option (leaving free, or Pro no longer opening it: pro to paid, or turning
+`pro_included` off) gives students with recorded progress a permanent `existing_learner` row. A Pro course cannot be bought on its own (409).
 
 ### `GET /courses` and `GET /courses/{id}`
 
-Both add `price`, `currency`, `access_days`, `payment_instructions`, `access_tier`, `purchasable`
+Both add `price`, `currency`, `access_days`, `payment_instructions`, `access_tier`, `pro_included`, `purchasable`
 (true only for a published paid course, so nobody pays for what would be refused) and, for students:
 
     "access": { "state": "locked", "expires_at": null, "pending_requests": 1 }
@@ -221,7 +222,7 @@ copied onto the request, so a later price change cannot alter it.
 
 | Route | Body | Result |
 |---|---|---|
-| `PATCH /teacher/courses/{id}` | also `{access_tier?, price?, access_days?, payment_instructions?}` | `access_tier` free or pro sets the price to 0 (duration and instructions stay saved). Paid needs a price, instructions and an owner; Pro needs an owner. A body with only a price works as before: above 0 is paid, 0 is free |
+| `PATCH /teacher/courses/{id}` | also `{access_tier?, pro_included?, price?, access_days?, payment_instructions?}` | `access_tier` free or pro sets the price to 0 (duration and instructions stay saved) and clears `pro_included`. Paid needs a price, instructions and an owner; Pro needs an owner. `pro_included: true` on anything but a paid course is a 422. A body with only a price works as before: above 0 is paid, 0 is free |
 | `GET /teacher/payment-requests` | `?status=&course_id=&teacher_id=&kind=&limit=&offset=` | `{items, total, pending_total}`. Each item has `kind`, the student (`name`, a real `email` only, `username`, `phone`), the `course` or the `plan`, what they saw, `terms_changed`, `image_reused`, `current_access` and `after_approval`. Plan requests are listed, decided and shown only to the main admin |
 | `GET /teacher/payment-requests/{id}/proof` | | The image, `no-store` |
 | `POST /teacher/payment-requests/{id}/approve` | | Decides and grants together. 409 if already decided |

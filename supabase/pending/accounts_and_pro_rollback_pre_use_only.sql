@@ -13,7 +13,7 @@ begin
      or exists (select 1 from public.plans)
      or exists (select 1 from public.memberships)
      or exists (select 1 from public.payment_requests where plan_id is not null)
-     or exists (select 1 from public.courses where access_tier = 'pro') then
+     or exists (select 1 from public.courses where access_tier = 'pro' or pro_included) then
     raise exception 'REFUSED: accounts or Pro are in use, so their data must be kept';
   end if;
 end $$;
@@ -28,8 +28,10 @@ drop table public.memberships;
 drop table public.plans;
 
 alter table public.courses
+  drop constraint courses_pro_included_check,
   drop constraint courses_tier_price_check,
   drop constraint courses_access_tier_check,
+  drop column pro_included,
   drop column access_tier;
 
 drop trigger if exists on_auth_user_app_metadata on auth.users;

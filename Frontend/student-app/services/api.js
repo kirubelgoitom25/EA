@@ -145,6 +145,8 @@ function mapCourse(course) {
     paymentInstructions: course.payment_instructions ?? "",
     // free, paid or pro. Older servers send none: the price decides, as before.
     accessTier: course.access_tier ?? (Number(course.price ?? 0) > 0 ? "paid" : "free"),
+    // A paid course that EA Pro members also open.
+    proIncluded: Boolean(course.pro_included),
     purchasable: course.purchasable ?? true,
     access: course.access
       ? {

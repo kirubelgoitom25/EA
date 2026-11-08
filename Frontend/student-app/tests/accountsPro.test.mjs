@@ -5,7 +5,7 @@ import {
   GOOGLE_SIGNIN_OPEN, checkPhone, checkRegister, checkSchool, checkUsername, isEmailLogin, normalizePhone,
 } from "../services/authModel.js";
 import {
-  accessLine, isLocked, isOpen, isProCourse, planDurationText, proButtonLabel, proLine, withPurchased,
+  accessLine, includedWithPro, isLocked, isOpen, isProCourse, planDurationText, proButtonLabel, proLine, withPurchased,
 } from "../services/access.js";
 
 test("Google is paused", () => {
@@ -87,4 +87,15 @@ test("the Pro upload goes through uploadFile too, never fetch", () => {
 test("a hidden internal address is never shown as the student's email", () => {
   const api = readFileSync(new URL("../services/api.js", import.meta.url), "utf8");
   assert.match(api, /email: me\.username \? null : me\.email/);
+});
+
+test("a paid course can also be included in EA Pro", () => {
+  const course = (state, extra = {}) => ({ id: "c", price: 500, currency: "ETB", accessTier: "paid", proIncluded: true, access: { state, ...extra } });
+  assert.equal(includedWithPro(course("locked")), true);
+  assert.equal(includedWithPro({ ...course("locked"), proIncluded: false }), false);
+  assert.equal(includedWithPro(proCourse("pro_locked")), true);
+  assert.equal(isOpen(course("pro")), true);
+  assert.equal(accessLine(course("pro")), "Included with Pro");
+  assert.equal(accessLine(course("locked")), "500 ETB");
+  assert.equal(accessLine(course("active", { expiresAt: null })), "Permanent access");
 });

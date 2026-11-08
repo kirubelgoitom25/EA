@@ -27,6 +27,8 @@ class CourseUpdateIn(StrictIn):
     access_days: Optional[int] = None
     payment_instructions: Optional[str] = None
     access_tier: Optional[str] = None
+    # Paid courses only: also open to EA Pro members.
+    pro_included: Optional[StrictBool] = None
 
 
 class ModuleIn(StrictIn):
@@ -116,6 +118,7 @@ class CourseStudioOut(BaseModel):
     access_days: Optional[int] = None
     payment_instructions: Optional[str] = None
     access_tier: str = "free"
+    pro_included: bool = False
     owner_id: Optional[str] = None
     published_at: Optional[datetime] = None
     created_at: Optional[datetime] = None

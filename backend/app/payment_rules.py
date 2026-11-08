@@ -13,9 +13,23 @@ OPEN_STATES = (FREE, CLASS, ACTIVE, PRO)
 # How a course is offered. Only a paid course has a price.
 TIER_FREE, TIER_PAID, TIER_PRO = "free", "paid", "pro"
 TIERS = (TIER_FREE, TIER_PAID, TIER_PRO)
-# Moving a course along one of these makes it harder to open, so students who already
-# started it keep it (see studio_service._keep_existing_learners).
-STRICTER = {(TIER_FREE, TIER_PAID), (TIER_FREE, TIER_PRO), (TIER_PRO, TIER_PAID)}
+
+
+def opens_with_pro(tier: str, pro_included: bool) -> bool:
+    """Whether an active Pro membership opens this course."""
+    return tier == TIER_PRO or (tier == TIER_PAID and bool(pro_included))
+
+
+def is_stricter(old_tier: str, old_pro: bool, new_tier: str, new_pro: bool) -> bool:
+    """A change that closes the course to someone who could open it before, so students
+    who already started it keep it (see studio_service._keep_existing_learners).
+
+    Purchases (course_access) open every option, so buyers never lose out. What can be
+    lost is "everyone" (leaving free) and "Pro members" (Pro no longer opening it).
+    """
+    if old_tier == TIER_FREE:
+        return new_tier != TIER_FREE
+    return opens_with_pro(old_tier, old_pro) and not opens_with_pro(new_tier, new_pro) and new_tier != TIER_FREE
 
 MEMBERSHIP_PRO = "pro"
 
@@ -62,24 +76,32 @@ def access_state(
     now: datetime,
     tier: Optional[str] = None,
     pro_active: bool = False,
+    pro_included: bool = False,
 ) -> str:
     """Why a student can or cannot open a course. Free and class access need no row.
 
-    The course_access row (expires_at, revoked_at, has_row) and Pro are independent:
-      * a paid course never looks at Pro, so Pro can neither open nor close it;
+    The course_access row (expires_at, revoked_at, has_row) always comes first, and Pro
+    only ever adds a way in:
+      * a paid course ignores Pro, unless its owner included it in Pro (pro_included);
+        then a running purchase still reads as ACTIVE, and Pro opens it for everyone else;
       * a pro course opens through a running course_access row first (bought before it
         became Pro, kept as an existing learner, or given by the admin), then through Pro.
-        Pro ending falls back to that row; it never removes it.
+    Pro ending falls back to the purchase; it never removes it.
     """
     tier = tier_of(price, tier)
     if tier == TIER_FREE:
         return FREE
     if in_class:
         return CLASS
+    running = has_row and grant_running(expires_at, revoked_at, now)
     if tier == TIER_PRO:
-        if has_row and grant_running(expires_at, revoked_at, now):
+        if running:
             return ACTIVE
         return PRO if pro_active else PRO_LOCKED
+    if running:
+        return ACTIVE
+    if pro_included and pro_active:
+        return PRO
     if not has_row:
         return LOCKED
     if revoked_at is not None:

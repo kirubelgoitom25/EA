@@ -13,6 +13,10 @@ export const isPaid = (course) => Number(course?.price) > 0;
 // A course that opens with EA Pro. Older servers send no tier: never Pro.
 export const isProCourse = (course) => course?.accessTier === "pro";
 
+// EA Pro opens it: a Pro course, or a paid course its teacher also included in Pro.
+export const includedWithPro = (course) =>
+  isProCourse(course) || (course?.accessTier === "paid" && Boolean(course?.proIncluded));
+
 export function money(amount, currency = "ETB") {
   const value = Number(amount);
   if (!Number.isFinite(value)) return `${amount} ${currency}`;
@@ -48,6 +52,7 @@ export function accessLine(course) {
     return "EA Pro";
   }
   if (!isPaid(course) || !access) return null;
+  if (access.state === "pro") return "Included with Pro";
   if (access.state === "class") return "Included with your class";
   if (access.state === "active") {
     return access.expiresAt ? `Access until ${dateText(access.expiresAt)}` : "Permanent access";

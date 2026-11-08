@@ -14,8 +14,9 @@ Opening, for a student (the content itself):
   * a free course they can see;
   * a paid or pro course given to their class;
   * a paid or pro course they hold running access to (course_access);
-  * a pro course, while their Pro membership is running.
-Pro never opens a paid course, and Pro ending never closes a course they hold access to.
+  * a pro course, or a paid course its owner included in Pro, while their Pro runs.
+Pro never opens any other paid course, and Pro ending never closes a course they hold
+access to.
 Seeing never implies opening: old progress keeps a course visible, not open.
 Everything that is not allowed answers 404, so a draft and a missing course look
 the same.
@@ -232,6 +233,7 @@ def student_course_views(
             now,
             tier=course.access_tier,
             pro_active=pro_active,
+            pro_included=course.pro_included,
         )
         owned = course.owner_id is not None
         visible = (

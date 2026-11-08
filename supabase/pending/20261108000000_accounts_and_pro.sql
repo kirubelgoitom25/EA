@@ -124,13 +124,17 @@ create trigger on_auth_user_app_metadata
   for each row execute function public.handle_user_app_metadata();
 
 -- 4. Course access option --------------------------------------------------------------------
+-- pro_included: a paid course its owner also includes in EA Pro (Pro members open it
+-- without buying; everyone else can still buy it).
 alter table public.courses
-  add column access_tier text not null default 'free';
+  add column access_tier  text    not null default 'free',
+  add column pro_included boolean not null default false;
 update public.courses set access_tier = 'paid' where price > 0;
 alter table public.courses
-  add constraint courses_access_tier_check check (access_tier in ('free','paid','pro')),
+  add constraint courses_access_tier_check  check (access_tier in ('free','paid','pro')),
   -- Only a paid course has a price.
-  add constraint courses_tier_price_check  check ((access_tier = 'paid') = (price > 0));
+  add constraint courses_tier_price_check   check ((access_tier = 'paid') = (price > 0)),
+  add constraint courses_pro_included_check check (not pro_included or access_tier = 'paid');
 
 -- 5. Pro plans (set by the admin) ---------------------------------------------------------
 create table public.plans (

@@ -21,8 +21,9 @@ test("free, paid and Pro each send what the server expects", () => {
   assert.deepEqual(P.pricingCheck({ tier: "free" }).values, { access_tier: "free" });
   assert.deepEqual(P.pricingCheck({ tier: "pro" }).values, { access_tier: "pro" });
   assert.deepEqual(P.pricingCheck({ tier: "paid", ...form }).values, {
-    access_tier: "paid", price: "500", access_days: 30, payment_instructions: "Pay me",
+    access_tier: "paid", price: "500", access_days: 30, payment_instructions: "Pay me", pro_included: false,
   });
+  assert.equal(P.pricingCheck({ tier: "paid", ...form, proIncluded: true }).values.pro_included, true);
   assert.equal(P.pricingCheck({ tier: "paid", ...form, price: "0" }).ok, false);
   // Older callers without a tier are unchanged.
   assert.deepEqual(P.pricingCheck({ paid: false }).values, { price: "0" });
@@ -34,6 +35,13 @@ test("the course's option, and which changes keep existing learners", () => {
   assert.equal(P.tierOf({ price: "0" }), "free");
   for (const [from, to] of [["free", "paid"], ["free", "pro"], ["pro", "paid"]]) assert.ok(P.isStricter(from, to));
   for (const [from, to] of [["paid", "pro"], ["paid", "free"], ["pro", "free"], ["pro", "pro"]]) assert.ok(!P.isStricter(from, to));
+  // A paid course included in EA Pro: taking it out of Pro closes it to Pro members.
+  assert.ok(P.isStricter("paid", "paid", true, false));
+  assert.ok(P.isStricter("free", "paid", false, true));
+  assert.ok(!P.isStricter("pro", "paid", false, true));
+  assert.ok(!P.isStricter("paid", "paid", false, true));
+  assert.ok(P.opensWithPro("paid", true));
+  assert.ok(!P.opensWithPro("paid", false));
 });
 
 test("phones read the way people write them, and hidden emails never show", () => {
@@ -48,6 +56,16 @@ test("temporary passwords have no look-alike characters", () => {
   assert.equal(password.length, 10);
   assert.doesNotMatch(password, /[01ilo]/i);
   assert.match(P.makeTemporaryPassword(), /^[a-z2-9]{10}$/);
+});
+
+test("a paid course can also be included in EA Pro", () => {
+  const course = { id: "c", owner_id: "t", access_tier: "paid", pro_included: true, price: "500.00", currency: "ETB", access_days: 30, payment_instructions: "Telebirr" };
+  const html = render(h(Cards.PricingCard, { course, setDirty: noop, onSave: noop }));
+  assert.match(html, /type="checkbox" checked=""[^>]*\/> Also include in EA Pro/);
+  assert.match(html, /EA Pro members open it without buying/);
+  assert.match(html, /Price \(ETB\)/);
+  const plain = render(h(Cards.PricingCard, { course: { ...course, pro_included: false }, setDirty: noop, onSave: noop }));
+  assert.match(plain, /Only students who buy it can open it/);
 });
 
 test("the pricing card offers free, paid and Pro", () => {

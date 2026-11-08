@@ -60,7 +60,8 @@ If any of these fails, stop. The fallback is Supabase's own phone login with an 
 ## 3. Pro tests on the test project
 
 1. Admin: add a plan on **EA Pro** (dashboard), e.g. "Pro, 1 month", 150 ETB, 30 days.
-2. Teacher: set one course to **Pro** in Course Studio; leave one **Paid**.
+2. Teacher: set one course to **Pro** in Course Studio; leave one **Paid**; make a third **Paid**
+   with **Also include in EA Pro** ticked (Pro members open it, others can buy it).
 3. Student A buys the paid course (approve it). Student B has nothing.
 4. Both open the Pro course: locked, "Get EA Pro". Send a Pro payment as A; approve it as admin
    (a teacher must not see it on Payments).

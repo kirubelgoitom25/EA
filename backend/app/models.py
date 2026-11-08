@@ -69,6 +69,9 @@ class Course(Base):
     payment_instructions = Column(Text, nullable=True)
     # free, paid or pro. Only a paid course has a price (a database rule).
     access_tier = Column(String, nullable=False, default="free", server_default="free")
+    # A paid course the owner also includes in EA Pro: Pro members open it without buying,
+    # everyone else can still buy it. Only a paid course can have it (a database rule).
+    pro_included = Column(Boolean, nullable=False, default=False, server_default="false")
 
     modules = relationship(
         "Module", back_populates="course", order_by="Module.sort_order"

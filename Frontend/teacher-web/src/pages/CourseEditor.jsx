@@ -558,7 +558,7 @@ export default function CourseEditor() {
 
       {owned && (
         <PricingCard
-          key={`pricing-${outline.access_tier}-${outline.price}-${outline.access_days}-${outline.payment_instructions}`}
+          key={`pricing-${outline.access_tier}-${outline.pro_included}-${outline.price}-${outline.access_days}-${outline.payment_instructions}`}
           course={outline}
           busy={busy}
           setDirty={setDirty}

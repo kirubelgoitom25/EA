@@ -2,7 +2,7 @@ import React from "react";
 import { StyleSheet, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 
-import { buyLabel, dateText, durationText, isProCourse, money, proButtonLabel } from "../services/access";
+import { buyLabel, dateText, durationText, includedWithPro, isProCourse, money, proButtonLabel } from "../services/access";
 import { ProBadge } from "./ProScreen";
 import { layout, space, tokens } from "../theme";
 import { flattenChapters } from "./session/sessionModel";
@@ -21,6 +21,8 @@ export default function LockedCourseScreen({ course, pro, backLabel, onBack, onB
   const waiting = access.pendingRequests > 0;
   const onSale = course.purchasable !== false;
   const proCourse = isProCourse(course);
+  // Paid, and also included in EA Pro: two ways in.
+  const alsoPro = !proCourse && includedWithPro(course);
 
   return (
     <Screen
@@ -41,6 +43,7 @@ export default function LockedCourseScreen({ course, pro, backLabel, onBack, onB
             </AppText>
           ) : null}
           {onSale ? <Button label={buyLabel(course)} onPress={onBuy} icon="lock-open-outline" /> : null}
+          {alsoPro ? <Button label={pro && pro.state !== "none" ? "Or renew EA Pro" : "Or get EA Pro"} variant="text" onPress={onPro} /> : null}
         </View>
         )
       }
@@ -61,6 +64,12 @@ export default function LockedCourseScreen({ course, pro, backLabel, onBack, onB
           <View style={styles.price}>
             <AppText variant="title">{money(course.price, course.currency)}</AppText>
             <AppText tone="secondary">{durationText(course.accessDays)}</AppText>
+            {alsoPro ? (
+              <View style={[styles.proRow, styles.alsoPro]}>
+                <ProBadge small />
+                <AppText variant="caption" tone="secondary">Included with EA Pro</AppText>
+              </View>
+            ) : null}
           </View>
         )}
       </View>
@@ -117,6 +126,7 @@ const styles = StyleSheet.create({
   top: { flexDirection: "row", alignItems: "center", gap: space.lg, marginTop: space.md },
   price: { flex: 1 },
   proRow: { flexDirection: "row", alignItems: "center", gap: space.sm },
+  alsoPro: { marginTop: space.xs },
   description: { marginTop: space.lg },
   link: { marginTop: space.sm, alignSelf: "flex-start" },
   section: { marginTop: space.xl, marginBottom: space.sm },

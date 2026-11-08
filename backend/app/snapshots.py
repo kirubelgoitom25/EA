@@ -157,6 +157,7 @@ class CatalogCourse:
     payment_instructions: Optional[str]
     modules: tuple
     access_tier: str = "free"
+    pro_included: bool = False
 
 
 @dataclass(frozen=True)
@@ -196,6 +197,7 @@ def _load_catalog(db: Session) -> Catalog:
             Course.id, Course.title, Course.description, Course.sort_order, Course.owner_id,
             Course.status, Course.price, Course.currency, Course.access_days,
             Course.payment_instructions, Course.created_at, Course.access_tier,
+            Course.pro_included,
         )
     ):
         courses.append(
@@ -213,6 +215,7 @@ def _load_catalog(db: Session) -> Catalog:
                     row.price, row.currency, row.access_days, row.payment_instructions,
                     tuple(modules_by_course.get(row.id, ())),
                     row.access_tier,
+                    bool(row.pro_included),
                 ),
             )
         )
