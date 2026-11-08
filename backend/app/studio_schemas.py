@@ -26,6 +26,7 @@ class CourseUpdateIn(StrictIn):
     # Sent as null, this means permanent access. Left out, it is not changed.
     access_days: Optional[int] = None
     payment_instructions: Optional[str] = None
+    access_tier: Optional[str] = None
 
 
 class ModuleIn(StrictIn):
@@ -114,6 +115,7 @@ class CourseStudioOut(BaseModel):
     currency: str = "ETB"
     access_days: Optional[int] = None
     payment_instructions: Optional[str] = None
+    access_tier: str = "free"
     owner_id: Optional[str] = None
     published_at: Optional[datetime] = None
     created_at: Optional[datetime] = None

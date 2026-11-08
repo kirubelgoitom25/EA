@@ -3,8 +3,8 @@ import { Alert, Image, Pressable, StyleSheet, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
 
-import { durationText, money } from "../services/access";
-import { MAX_PROOF_BYTES, submitPaymentRequest } from "../services/api";
+import { durationText, money, planDurationText } from "../services/access";
+import { MAX_PROOF_BYTES, submitPaymentRequest, submitPlanRequest } from "../services/api";
 import { layout, space, tokens } from "../theme";
 import AppText from "./ui/AppText";
 import Button from "./ui/Button";
@@ -12,9 +12,31 @@ import Fox from "./ui/Fox";
 import Header from "./ui/Header";
 import Screen from "./ui/Screen";
 
-// Paying for a course: how to pay, then one screenshot. The price shown is only for reading. What
-// the student is charged comes from the server, and the upload carries nothing but the image.
-export default function PurchaseScreen({ course, backLabel, onBack, onSent, onRequests }) {
+// Paying for a course or for EA Pro: how to pay, then one screenshot. The price shown is only for
+// reading. What the student is charged comes from the server, and the upload carries nothing but
+// the image. Give either course or plan.
+export default function PurchaseScreen({ course, plan, backLabel, onBack, onSent, onRequests }) {
+  const item = plan
+    ? {
+        title: plan.title,
+        price: plan.price,
+        currency: plan.currency,
+        duration: `EA Pro for ${planDurationText(plan.accessDays)}`,
+        instructions: plan.paymentInstructions,
+        heading: "Get EA Pro",
+        sentText: "EA will check your payment. Pro starts as soon as it's approved, and every Pro course opens.",
+        submit: (image) => submitPlanRequest(plan.id, image),
+      }
+    : {
+        title: course.title,
+        price: course.price,
+        currency: course.currency,
+        duration: durationText(course.accessDays),
+        instructions: course.paymentInstructions,
+        heading: "Get access",
+        sentText: `Your teacher will check your payment for ${course.title}. The course opens as soon as it's approved.`,
+        submit: (image) => submitPaymentRequest(course.id, image),
+      };
   const [image, setImage] = useState(null);
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState(false);
@@ -46,7 +68,7 @@ export default function PurchaseScreen({ course, backLabel, onBack, onSent, onRe
     if (!image || sending) return;
     setSending(true);
     try {
-      await submitPaymentRequest(course.id, image);
+      await item.submit(image);
       setSent(true);
       onSent();
     } catch (error) {
@@ -70,7 +92,7 @@ export default function PurchaseScreen({ course, backLabel, onBack, onSent, onRe
           <Fox mood="greeting" size={140} />
           <AppText variant="title" style={styles.center}>Sent for review</AppText>
           <AppText tone="secondary" style={styles.center}>
-            {`Your teacher will check your payment for ${course.title}. The course opens as soon as it's approved.`}
+            {item.sentText}
           </AppText>
         </View>
       </Screen>
@@ -85,16 +107,16 @@ export default function PurchaseScreen({ course, backLabel, onBack, onSent, onRe
         </View>
       }
     >
-      <Header title="Get access" backLabel={backLabel} onBack={onBack} />
+      <Header title={item.heading} backLabel={backLabel} onBack={onBack} />
 
       <View style={styles.summary}>
-        <AppText variant="bodyStrong" numberOfLines={2}>{course.title}</AppText>
-        <AppText variant="title" style={styles.amount}>{money(course.price, course.currency)}</AppText>
-        <AppText tone="secondary">{durationText(course.accessDays)}</AppText>
+        <AppText variant="bodyStrong" numberOfLines={2}>{item.title}</AppText>
+        <AppText variant="title" style={styles.amount}>{money(item.price, item.currency)}</AppText>
+        <AppText tone="secondary">{item.duration}</AppText>
       </View>
 
       <AppText variant="overline" tone="secondary" style={styles.section}>1. PAY</AppText>
-      <AppText selectable>{course.paymentInstructions}</AppText>
+      <AppText selectable>{item.instructions}</AppText>
 
       <AppText variant="overline" tone="secondary" style={styles.section}>2. UPLOAD YOUR SCREENSHOT</AppText>
       <Pressable

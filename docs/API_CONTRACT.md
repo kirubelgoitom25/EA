@@ -181,21 +181,38 @@ Payment is checked by hand: nothing here talks to a payment provider.
   student only added on their phone leave nothing on the server, so those students see it locked.
 - Progress, XP and streaks are never touched by expiry or revocation.
 
+### Course access options (`access_tier`)
+
+Every course is `free`, `paid` or `pro`. Only a paid course has a price (a database rule).
+
+| Option | Opens when |
+|---|---|
+| `free` | Always |
+| any, given to the student's class | Always |
+| `paid` | The student holds running `course_access` (bought, kept as an existing learner, or given by the admin). Pro never opens or closes a paid course |
+| `pro` | Running `course_access` first, then an active EA Pro membership. Pro ending falls back to the purchase; it never removes it |
+
+Changing to a stricter option (free to paid, free to pro, pro to paid) gives students with recorded
+progress a permanent `existing_learner` row. A Pro course cannot be bought on its own (409).
+
 ### `GET /courses` and `GET /courses/{id}`
 
-Both add `price`, `currency`, `access_days`, `payment_instructions`, `purchasable` (false once a
-course is unpublished, so nobody pays for what would be refused) and, for students:
+Both add `price`, `currency`, `access_days`, `payment_instructions`, `access_tier`, `purchasable`
+(true only for a published paid course, so nobody pays for what would be refused) and, for students:
 
     "access": { "state": "locked", "expires_at": null, "pending_requests": 1 }
 
-`state` is `free`, `class`, `active`, `expired`, `revoked` or `locked`. The first three are open.
+`state` is `free`, `class`, `active`, `pro` (open) or `expired`, `revoked`, `locked`,
+`pro_locked` (closed).
 
 ### Student routes
 
 | Route | Body | Result |
 |---|---|---|
 | `POST /courses/{id}/payment-requests` | multipart, field `proof`, a JPG, PNG or WebP of at most 5 MB | 201. 200 if the same image is already waiting. 409 if there is nothing to buy (free, in your class, already permanent, not published). 413, 415. 429 once 5 requests are undecided on this course |
-| `GET /me/payment-requests` | | Own requests, newest first: `{id, course_id, course_title, status, amount, currency, access_days, review_note, created_at, reviewed_at}` |
+| `GET /me/payment-requests` | | Own requests, newest first: `{id, kind, course_id, plan_id, course_title, status, amount, currency, access_days, review_note, created_at, reviewed_at}`. `kind` is `course` or `plan`; `course_title` holds the plan title for a plan |
+| `GET /plans` | | The EA Pro plans on sale: `[{id, title, price, currency, access_days, payment_instructions, is_active, sort_order}]` |
+| `POST /plans/{id}/payment-requests` | multipart, field `proof` | Same rules as a course. 404 for a plan off sale. 409 with permanent Pro. 429 once 5 Pro requests are undecided |
 
 The upload carries only the image. The amount, currency and duration are read from the course, and
 copied onto the request, so a later price change cannot alter it.
@@ -204,8 +221,8 @@ copied onto the request, so a later price change cannot alter it.
 
 | Route | Body | Result |
 |---|---|---|
-| `PATCH /teacher/courses/{id}` | also `{price?, access_days?, payment_instructions?}` | `access_days` null means permanent. A price needs instructions and an owner |
-| `GET /teacher/payment-requests` | `?status=&course_id=&teacher_id=&limit=&offset=` | `{items, total, pending_total}`. Each item has the student, the course, what they saw, `terms_changed`, `image_reused`, `current_access` and `after_approval` |
+| `PATCH /teacher/courses/{id}` | also `{access_tier?, price?, access_days?, payment_instructions?}` | `access_tier` free or pro sets the price to 0 (duration and instructions stay saved). Paid needs a price, instructions and an owner; Pro needs an owner. A body with only a price works as before: above 0 is paid, 0 is free |
+| `GET /teacher/payment-requests` | `?status=&course_id=&teacher_id=&kind=&limit=&offset=` | `{items, total, pending_total}`. Each item has `kind`, the student (`name`, a real `email` only, `username`, `phone`), the `course` or the `plan`, what they saw, `terms_changed`, `image_reused`, `current_access` and `after_approval`. Plan requests are listed, decided and shown only to the main admin |
 | `GET /teacher/payment-requests/{id}/proof` | | The image, `no-store` |
 | `POST /teacher/payment-requests/{id}/approve` | | Decides and grants together. 409 if already decided |
 | `POST /teacher/payment-requests/{id}/reject` | `{note?}` | The note is optional. 409 if already decided |
@@ -219,14 +236,44 @@ in SQL, and no route can change it. They also edit every course through the teac
 
 | Route | Body | Result |
 |---|---|---|
-| `GET /admin/people` | `?role=&q=&limit=&offset=` | `{items, total}` |
-| `GET /admin/people/{id}` | | The person, their requests, access and owned courses |
+| `GET /admin/people` | `?role=&q=&limit=&offset=` | `{items, total}`. `q` matches name, email, username or phone (in any written form) |
+| `GET /admin/people/{id}` | | The person, `school`, `pro`, their requests, access and owned courses |
 | `PATCH /admin/people/{id}` | `{is_active?, role?}` | 409 for yourself, the main admin, or returning a teacher who still owns courses |
 | `PUT /admin/courses/{id}/owner` | `{owner_id}` | The new owner must be an active teacher |
 | `PUT /admin/courses/{id}/access/{student_id}` | `{access_days}` | Grants or extends with no payment. Null means permanent |
+| `PUT /admin/people/{id}/password` | `{password}` | Sets a temporary password (at least 8 characters). Same 409s as `PATCH` |
+| `PUT /admin/people/{id}/pro` | `{access_days}` | Gives or extends EA Pro with no payment. Null means permanent. Students only |
+| `DELETE /admin/people/{id}/pro` | | Ends Pro now. Never touches `course_access` |
+| `GET /admin/plans` | | Every plan, on sale or not |
+| `POST /admin/plans` | `{title, price, access_days, payment_instructions}` | 201. Price above 0, a duration in days |
+| `PATCH /admin/plans/{id}` | `{title?, price?, access_days?, payment_instructions?, is_active?, sort_order?}` | Sent requests keep the terms the student saw |
 
 ### `GET /ranking`
 
+Each row has `pro` (true while that student's Pro runs; the national board may lag by a minute).
 `scope=national` takes `period` (`weekly`, `monthly`, `overall`) and returns the top 50 for it plus
 the student's own row. Names are first name and last initial, `id` is empty except on the student's
 own row, and each row has its real `position`. `scope=class` keeps full names.
+
+---
+
+## Student accounts (phone + username)
+
+Public sign-up stays off in Supabase. The backend creates every student account with the service
+key, so every sign-up passes these checks first. Supabase still needs an email per account, so each
+student gets a hidden internal address `s.<16 hex>@<STUDENT_EMAIL_DOMAIN>` that is never shown and
+never receives mail.
+
+| Route | Body | Result |
+|---|---|---|
+| `POST /auth/register` | `{username, phone, password, school}` | Public. 201 `{login_email}`: the app signs in with it and the password. 409 if the username or phone is taken. 422 for a bad field. 429 when rate limited. 503 while `STUDENT_EMAIL_DOMAIN` is unset |
+| `POST /auth/resolve-login` | `{identifier}` | Public. A phone (any written form) or username in, `{email}` out. An unknown one gets a made-up address of the same shape, so the login answer never shows who has an account. An email passes through |
+| `GET /me/profile` | | Student. `{name, username, phone, school, profile_complete}` |
+| `PATCH /me/profile` | `{username?, phone?, school?}` | Student. Only the fields sent change. 409 if taken |
+
+`GET /auth/me` adds, for students: `username`, `phone`, `profile_complete` (false asks an older email
+account once for these) and `pro: {state, active, expires_at, source}`.
+
+Rules: username 3 to 20 of `a-z 0-9 _`, stored lowercase, a few official-looking names refused;
+phone is Ethiopian mobile, stored as `+2519XXXXXXXX` or `+2517XXXXXXXX`; password 8 characters to
+72 bytes; school 2 to 120 characters. Staff see phone and username, never an internal address.

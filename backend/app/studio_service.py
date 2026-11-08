@@ -48,9 +48,13 @@ from app.models import (
 )
 from app.payment_rules import (
     SOURCE_EXISTING,
+    STRICTER,
+    TIER_FREE,
+    TIER_PAID,
     clean_access_days,
     clean_instructions,
     clean_price,
+    clean_tier,
 )
 from app.studio_rules import (
     DRAFT,
@@ -137,6 +141,7 @@ def _course_out(course: Course, teacher_id: uuid.UUID, editable: bool) -> dict:
         "currency": course.currency,
         "access_days": course.access_days,
         "payment_instructions": course.payment_instructions,
+        "access_tier": course.access_tier,
         "owner_id": str(course.owner_id) if course.owner_id else None,
         "published_at": course.published_at,
         "created_at": course.created_at,
@@ -261,11 +266,12 @@ def update_course(db: Session, teacher_id: uuid.UUID, course_id: str, values: di
     if "description" in values:
         changes["description"] = clean_description(values["description"])
     changes.update(_pricing_changes(course, values))
-    becomes_paid = not course.price and bool(changes.get("price"))
+    before = course.access_tier
+    stricter = (before, changes.get("access_tier", before)) in STRICTER
     with transaction(db):
         for field, value in changes.items():
             setattr(course, field, value)
-        if becomes_paid:
+        if stricter:
             _keep_existing_learners(db, course, teacher_id)
         course.updated_at = _now()
         db.flush()
@@ -275,7 +281,12 @@ def update_course(db: Session, teacher_id: uuid.UUID, course_id: str, values: di
 
 
 def _pricing_changes(course: Course, values: dict) -> dict:
-    """The pricing fields that were sent, checked together with what is already saved."""
+    """The pricing fields that were sent, checked together with what is already saved.
+
+    access_tier decides: free and pro courses have no price, a paid course must have one.
+    A client that sends only a price (older dashboards) gets paid for a price above 0 and
+    free for 0, as before.
+    """
     changes = {}
     if values.get("price") is not None:
         changes["price"] = clean_price(values["price"])
@@ -283,21 +294,40 @@ def _pricing_changes(course: Course, values: dict) -> dict:
         changes["access_days"] = clean_access_days(values["access_days"])
     if "payment_instructions" in values:
         changes["payment_instructions"] = clean_instructions(values["payment_instructions"])
-    if not changes:
+    if values.get("access_tier") is not None:
+        tier = clean_tier(values["access_tier"])
+    elif "price" in changes:
+        tier = TIER_PAID if changes["price"] else (
+            TIER_FREE if course.access_tier == TIER_PAID else course.access_tier
+        )
+    else:
+        tier = course.access_tier
+    if not changes and tier == course.access_tier:
         return changes
 
-    price = changes.get("price", course.price)
-    instructions = changes.get("payment_instructions", course.payment_instructions)
-    if price:
-        if course.owner_id is None:
-            raise ContentError("A course needs an owner before it can have a price")
-        if not instructions:
+    if tier != TIER_FREE and course.owner_id is None:
+        raise ContentError(
+            "A course needs an owner before it can have a price"
+            if tier == TIER_PAID
+            else "A course needs an owner before it can be Pro"
+        )
+    if tier == TIER_PAID:
+        if not changes.get("price", course.price):
+            raise ContentError("Enter a price above 0, or choose Free or Pro")
+        if not changes.get("payment_instructions", course.payment_instructions):
             raise ContentError("Tell students how to pay before setting a price")
+    else:
+        # Free and Pro courses have no price. Duration and instructions stay saved, so
+        # switching back to paid brings them back.
+        changes["price"] = clean_price(0)
+    if tier != course.access_tier:
+        changes["access_tier"] = tier
     return changes
 
 
 def _keep_existing_learners(db: Session, course: Course, granted_by: uuid.UUID) -> None:
-    """A free course became paid: anyone with recorded progress keeps it, permanently.
+    """A course became harder to open (free to paid or pro, pro to paid): anyone with
+    recorded progress keeps it, permanently, as a course_access row of its own.
 
     Archived lessons count too. Existing rows are left alone, so going free and back
     to paid never revives expired or revoked access. Courses a student only added on

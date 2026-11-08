@@ -28,4 +28,10 @@ export const adminApi = {
   setOwner: (courseId, ownerId) => api.put(`/admin/courses/${enc(courseId)}/owner`, { owner_id: ownerId }),
   grant: (courseId, studentId, accessDays) =>
     api.put(`/admin/courses/${enc(courseId)}/access/${enc(studentId)}`, { access_days: accessDays }),
+  setPassword: (id, password) => api.put(`/admin/people/${enc(id)}/password`, { password }),
+  grantPro: (id, accessDays) => api.put(`/admin/people/${enc(id)}/pro`, { access_days: accessDays }),
+  revokePro: (id) => api.del(`/admin/people/${enc(id)}/pro`),
+  plans: () => api.get("/admin/plans"),
+  createPlan: (body) => api.post("/admin/plans", body),
+  updatePlan: (id, body) => api.patch(`/admin/plans/${enc(id)}`, body),
 };

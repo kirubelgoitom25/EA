@@ -30,6 +30,8 @@ import { forgetPathMotion } from "./components/ui/pathMotionModel";
 import LockedCourseScreen from "./components/LockedCourseScreen";
 import PurchaseScreen from "./components/PurchaseScreen";
 import PaymentRequestsScreen from "./components/PaymentRequestsScreen";
+import ProScreen from "./components/ProScreen";
+import FinishProfileScreen from "./components/FinishProfileScreen";
 import RankingScreen from "./components/RankingScreen";
 import ChapterPathScreen, { forgetChapterCache } from "./components/ChapterPathScreen";
 import ActivityScreen from "./components/ActivityScreen";
@@ -39,13 +41,15 @@ import BottomNavBar from "./components/BottomNavBar";
 import { HomeSkeleton } from "./components/ui/Skeleton";
 import { flattenChapters, nextChapter } from "./components/session/sessionModel";
 import { loadMyCourseIds, saveMyCourseIds } from "./services/myCourses";
-import { isLocked, withPurchased } from "./services/access";
+import { isLocked, isProCourse, withPurchased } from "./services/access";
 import { isAuthCallback } from "./services/authModel";
 import { finishGoogleSignIn, googleSignInInProgress, signInWithGoogle } from "./services/googleAuth";
 
 import { supabase } from "./lib/supabase";
 import {
   loginUser,
+  registerStudent,
+  fetchMe,
   logoutUser,
   signUpUser,
   verifySignUpCode,
@@ -100,6 +104,9 @@ export default function App() {
   });
 
   const [user, setUser] = useState(null);
+  // The student's EA Pro, refreshed when Pro screens open (a payment can be approved meanwhile).
+  const [pro, setPro] = useState(null);
+  const [selectedPlan, setSelectedPlan] = useState(null);
   // Screen history (see navigation.js). The last entry is on screen.
   const [stack, setStack] = useState([LOGIN]);
   const screen = currentScreen(stack);
@@ -154,6 +161,8 @@ export default function App() {
     rankingRequestId.current += 1;
     refreshQueued.current = false;
     setUser(null);
+    setPro(null);
+    setSelectedPlan(null);
     setStudent(null);
     setCourses([]);
     setRanking(EMPTY_RANKING);
@@ -192,6 +201,7 @@ export default function App() {
         if (!restoredUser) prefetched.current = null;
         if (!cancelled && restoredUser) {
           setUser(restoredUser);
+          setPro(restoredUser.pro ?? null);
           setStack([HOME]);
         }
       })
@@ -440,17 +450,42 @@ export default function App() {
 
   const enterApp = (signedIn) => {
     setUser(signedIn);
+    setPro(signedIn.pro ?? null);
     setStack([HOME]);
   };
 
-  const handleLogin = async ({ email, password }) => {
+  const handleLogin = async ({ identifier, password }) => {
     try {
-      enterApp(await loginUser(email.trim(), password));
+      enterApp(await loginUser(identifier.trim(), password));
     } catch (error) {
       if (error.needsConfirmation) return "verify";
       Alert.alert("Login failed", error.message);
     }
     return null;
+  };
+
+  // Returns "login" when the account was made but signing in didn't work, so the form switches.
+  const handleRegister = async (details) => {
+    try {
+      enterApp(await registerStudent(details));
+      return "signedIn";
+    } catch (error) {
+      if (/was created/.test(error.message)) return "login";
+      Alert.alert("Couldn't create your account", error.message);
+      return null;
+    }
+  };
+
+  // Pro as the server sees it now. A failure keeps what's on screen.
+  const refreshPro = () => {
+    fetchMe()
+      .then((me) => setPro(me.pro))
+      .catch(() => {});
+  };
+
+  const openPro = () => {
+    refreshPro();
+    openScreen("pro");
   };
 
   const handleGoogle = async () => {
@@ -698,9 +733,14 @@ export default function App() {
     showScreen([...stack, "course", "path", ...(straightToStage ? ["stage"] : [])]);
   };
 
-  // "Submit again" from the list of requests. A course that has since gone isn't on sale.
-  const buyAgain = (courseId) => {
-    const course = courses.find((candidate) => candidate.id === courseId);
+  // "Submit again" from the list of requests. A course that has since gone isn't on sale. A Pro
+  // request goes back to the plans, which may have changed.
+  const buyAgain = (request) => {
+    if (request.kind === "plan") {
+      openPro();
+      return;
+    }
+    const course = courses.find((candidate) => candidate.id === request.courseId);
     if (!course || course.purchasable === false) {
       Alert.alert("Not available", "This course isn't available to buy right now.");
       return;
@@ -716,7 +756,7 @@ export default function App() {
     selectedLesson;
 
   // Shown on a back link: the screen you'd return to.
-  const BACK_LABELS = { home: "Home", courses: "Courses", explore: "Explore", profile: "Profile", payments: "Requests" };
+  const BACK_LABELS = { home: "Home", courses: "Courses", explore: "Explore", profile: "Profile", payments: "Requests", pro: "EA Pro" };
   const previousScreen = stack[stack.length - 2];
   const backLabel =
     previousScreen === "course" ? selectedCourse?.title : BACK_LABELS[previousScreen];
@@ -743,12 +783,26 @@ export default function App() {
     return (
       <LoginScreen
         onLogin={handleLogin}
+        onRegister={handleRegister}
         onGoogle={handleGoogle}
         onSignUp={handleSignUp}
         onVerify={handleVerify}
         onResend={handleResend}
         onForgot={handleForgot}
         onReset={handleReset}
+      />
+    );
+  }
+
+  // Accounts from before phone sign-up are asked once for username, phone and school.
+  if (user.profileComplete === false) {
+    return (
+      <FinishProfileScreen
+        user={user}
+        onDone={(profile) =>
+          setUser({ ...user, username: profile.username, phone: profile.phone, profileComplete: profile.profileComplete })
+        }
+        onLogout={handleLogout}
       />
     );
   }
@@ -778,10 +832,12 @@ export default function App() {
     return (
       <ProfileScreen
         user={student}
+        pro={pro}
         ranking={rankingEntries}
         onBack={goBack}
         onLogout={handleLogout}
         onRequests={() => openScreen("payments")}
+        onPro={openPro}
         {...navProps}
       />
     );
@@ -826,6 +882,34 @@ export default function App() {
     );
   }
 
+  if (screen === "pro") {
+    return (
+      <ProScreen
+        pro={pro}
+        proCourseCount={courses.filter(isProCourse).length}
+        backLabel={backLabel}
+        onBack={goBack}
+        onChoose={(plan) => {
+          setSelectedPlan(plan);
+          openScreen("purchasePlan");
+        }}
+        onRequests={() => openScreen("payments")}
+      />
+    );
+  }
+
+  if (screen === "purchasePlan" && selectedPlan) {
+    return (
+      <PurchaseScreen
+        plan={selectedPlan}
+        backLabel={backLabel}
+        onBack={goBack}
+        onSent={refreshProgress}
+        onRequests={() => showScreen([...stack.slice(0, -1), "payments"])}
+      />
+    );
+  }
+
   if (screen === "payments") {
     return <PaymentRequestsScreen backLabel={backLabel} onBack={goBack} onSubmitAgain={buyAgain} />;
   }
@@ -834,9 +918,11 @@ export default function App() {
     return (
       <LockedCourseScreen
         course={selectedCourse}
+        pro={pro}
         backLabel={backLabel}
         onBack={goBack}
         onBuy={() => openScreen("purchase")}
+        onPro={openPro}
         onRequests={() => openScreen("payments")}
       />
     );

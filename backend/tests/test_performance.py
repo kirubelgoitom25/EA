@@ -563,10 +563,12 @@ class AccessEquivalenceTests(unittest.TestCase):
         lessons = []
         for ci in range(8):
             cid = f"course{ci}"
+            price = Decimal(rnd.choice([0, 0, 100]))
+            # The database rule: only a paid course has a price (accounts_and_pro migration).
             db.add(Course(id=cid, title=cid, description="d", sort_order=rnd.randint(0, 3),
                           owner_id=rnd.choice([None, teacher.id]),
                           status=rnd.choice(["draft", "published", "unpublished"]),
-                          price=Decimal(rnd.choice([0, 0, 100]))))
+                          price=price, access_tier="paid" if price else "free"))
             for klass in ("c1", "c2"):
                 if rnd.random() < 0.35:
                     db.add(ClassCourse(class_id=klass, course_id=cid))

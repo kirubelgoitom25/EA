@@ -88,8 +88,9 @@ def _course_to_dict(course: Course, completed: set[str], access: Optional[dict] 
         "currency": course.currency,
         "access_days": course.access_days,
         "payment_instructions": course.payment_instructions,
+        "access_tier": getattr(course, "access_tier", "free"),
         # A student must never pay for something the server would then refuse.
-        "purchasable": course.status == "published",
+        "purchasable": course.status == "published" and getattr(course, "access_tier", "free") == "paid",
         "access": access,
         "modules": modules_out,
     }

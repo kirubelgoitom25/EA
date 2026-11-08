@@ -14,7 +14,10 @@ from app.content_schemas import StrictIn
 
 class MyPaymentRequestOut(BaseModel):
     id: str
-    course_id: str
+    kind: Literal["course", "plan"] = "course"
+    course_id: Optional[str] = None
+    plan_id: Optional[str] = None
+    # The course or plan title (the name is kept for older apps).
     course_title: str
     status: str
     amount: Decimal
@@ -28,7 +31,10 @@ class MyPaymentRequestOut(BaseModel):
 class PersonRefOut(BaseModel):
     id: str
     name: str
+    # A real email only. Students who signed up by phone have none to show.
     email: Optional[str] = None
+    username: Optional[str] = None
+    phone: Optional[str] = None
 
 
 class ReviewCourseOut(BaseModel):
@@ -39,6 +45,14 @@ class ReviewCourseOut(BaseModel):
     price: Decimal
     currency: str
     access_days: Optional[int] = None
+
+
+class ReviewPlanOut(BaseModel):
+    id: str
+    title: str
+    price: Decimal
+    currency: str
+    access_days: int
 
 
 class CurrentAccessOut(BaseModel):
@@ -53,9 +67,12 @@ class AfterApprovalOut(BaseModel):
 
 class ReviewRequestOut(BaseModel):
     id: str
+    kind: Literal["course", "plan"] = "course"
     status: str
     student: PersonRefOut
-    course: ReviewCourseOut
+    # Exactly one of these.
+    course: Optional[ReviewCourseOut] = None
+    plan: Optional[ReviewPlanOut] = None
     amount: Decimal
     currency: str
     access_days: Optional[int] = None
@@ -96,6 +113,8 @@ class PersonOut(BaseModel):
     id: str
     name: str
     email: Optional[str] = None
+    username: Optional[str] = None
+    phone: Optional[str] = None
     role: str
     is_active: bool
     is_admin: bool
@@ -122,7 +141,16 @@ class PersonAccessOut(BaseModel):
     source: str
 
 
+class MembershipOut(BaseModel):
+    state: str  # none, active, expired or revoked
+    active: bool
+    expires_at: Optional[datetime] = None
+    source: Optional[str] = None
+
+
 class PersonDetailOut(PersonOut):
+    school: Optional[str] = None
+    pro: MembershipOut
     requests: list[MyPaymentRequestOut]
     access: list[PersonAccessOut]
     owned_courses: list[PersonCourseOut]
@@ -141,3 +169,42 @@ class OwnerIn(StrictIn):
 class GrantIn(StrictIn):
     # Required, and may be null: null means permanent.
     access_days: Optional[int]
+
+
+class TemporaryPasswordIn(StrictIn):
+    password: str
+
+
+class ProGrantIn(StrictIn):
+    # Required, and may be null: null means permanent.
+    access_days: Optional[int]
+
+
+# ---- Pro plans ----------------------------------------------------------------------
+
+
+class PlanOut(BaseModel):
+    id: str
+    title: str
+    price: Decimal
+    currency: str
+    access_days: int
+    payment_instructions: str
+    is_active: bool
+    sort_order: int
+
+
+class PlanCreateIn(StrictIn):
+    title: str
+    price: Decimal
+    access_days: int
+    payment_instructions: str
+
+
+class PlanUpdateIn(StrictIn):
+    title: Optional[str] = None
+    price: Optional[Decimal] = None
+    access_days: Optional[int] = None
+    payment_instructions: Optional[str] = None
+    is_active: Optional[StrictBool] = None
+    sort_order: Optional[int] = None

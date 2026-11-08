@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { RefreshControl, StyleSheet, View } from "react-native";
 
-import { REQUEST_STATUS, dateText, durationText, money } from "../services/access";
+import { REQUEST_STATUS, dateText, durationText, money, planDurationText } from "../services/access";
 import { fetchMyPaymentRequests } from "../services/api";
 import { layout, space, tokens } from "../theme";
 import AppText from "./ui/AppText";
@@ -48,7 +48,7 @@ export default function PaymentRequestsScreen({ backLabel, onBack, onSubmitAgain
       {error ? <AppText tone="secondary" style={styles.message}>{error}</AppText> : null}
       {!requests && !error ? <RowsSkeleton count={3} /> : null}
       {requests?.length === 0 ? (
-        <EmptyState title="No requests yet" message="When you pay for a course, you can follow it here." />
+        <EmptyState title="No requests yet" message="When you pay for a course or for EA Pro, you can follow it here." />
       ) : null}
       {(requests ?? []).map((request) => (
         <RequestCard key={request.id} request={request} onSubmitAgain={onSubmitAgain} />
@@ -61,6 +61,8 @@ export function RequestCard({ request, onSubmitAgain }) {
   const status = REQUEST_STATUS[request.status] ?? REQUEST_STATUS.pending;
   const tone = TONES[status.tone];
   const rejected = request.status === "rejected";
+  const plan = request.kind === "plan";
+  const duration = plan ? `EA Pro for ${planDurationText(request.accessDays)}` : durationText(request.accessDays);
 
   return (
     <View style={styles.card}>
@@ -71,12 +73,12 @@ export function RequestCard({ request, onSubmitAgain }) {
         </View>
       </View>
       <AppText variant="caption" tone="secondary">
-        {`${money(request.amount, request.currency)} · ${durationText(request.accessDays)} · ${dateText(request.createdAt)}`}
+        {`${money(request.amount, request.currency)} · ${duration} · ${dateText(request.createdAt)}`}
       </AppText>
       {rejected ? (
         <>
           <AppText style={styles.reason}>{request.reviewNote || "No reason was given."}</AppText>
-          <Button label="Submit again" variant="text" onPress={() => onSubmitAgain(request.courseId)} style={styles.again} />
+          <Button label="Submit again" variant="text" onPress={() => onSubmitAgain(request)} style={styles.again} />
         </>
       ) : null}
     </View>

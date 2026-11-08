@@ -1,6 +1,6 @@
 import { supabase } from "../lib/supabase";
 import { API_BASE_URL } from "../config";
-import { signUpOutcome } from "./authModel";
+import { isEmailLogin, normalizePhone, signUpOutcome } from "./authModel";
 import { createResponseCache, createShortReuse, sameInputSameOutput } from "./responseCache";
 
 
@@ -143,6 +143,8 @@ function mapCourse(course) {
     currency: course.currency ?? "ETB",
     accessDays: course.access_days ?? null,
     paymentInstructions: course.payment_instructions ?? "",
+    // free, paid or pro. Older servers send none: the price decides, as before.
+    accessTier: course.access_tier ?? (Number(course.price ?? 0) > 0 ? "paid" : "free"),
     purchasable: course.purchasable ?? true,
     access: course.access
       ? {
@@ -177,14 +179,55 @@ export async function loadStudentUser() {
     );
   }
 
-  return { id: me.id, name: me.name, email: me.email, role: me.role };
+  return mapMe(me);
 }
 
-export async function loginUser(email, password) {
-  if (!email || !password) {
-    throw new Error("Email and password are required.");
+// Pro, as the screens read it. Older servers send none: no Pro.
+export function mapPro(pro) {
+  return {
+    state: pro?.state ?? "none",
+    active: Boolean(pro?.active),
+    expiresAt: pro?.expires_at ?? null,
+  };
+}
+
+function mapMe(me) {
+  return {
+    id: me.id,
+    name: me.name,
+    // Students who signed up by phone have a hidden internal address. It's never shown.
+    email: me.username ? null : me.email,
+    role: me.role,
+    username: me.username ?? null,
+    phone: me.phone ?? null,
+    // null on older servers: then nothing is asked.
+    profileComplete: me.profile_complete ?? null,
+    pro: mapPro(me.pro),
+  };
+}
+
+// Fresh account facts (Pro can change after a payment is approved).
+export async function fetchMe() {
+  return mapMe(await request("/auth/me", { fresh: true }));
+}
+
+// Phone or username in, the address Supabase knows the account by out. An email passes as is.
+async function loginEmailFor(identifier) {
+  const trimmed = identifier.trim();
+  if (isEmailLogin(trimmed)) return trimmed;
+  const { email } = await request("/auth/resolve-login", {
+    method: "POST",
+    body: JSON.stringify({ identifier: normalizePhone(trimmed) ?? trimmed }),
+  });
+  return email;
+}
+
+export async function loginUser(identifier, password) {
+  if (!identifier || !password) {
+    throw new Error("Enter your phone number or username, and your password.");
   }
 
+  const email = await loginEmailFor(identifier);
   const { error } = await supabase.auth.signInWithPassword({ email, password });
 
   if (error) {
@@ -202,10 +245,49 @@ export async function loginUser(email, password) {
       unconfirmed.needsConfirmation = true;
       throw unconfirmed;
     }
-    throw new Error("Incorrect email or password.");
+    throw new Error(
+      isEmailLogin(identifier)
+        ? "Incorrect email or password."
+        : "Incorrect phone number, username or password.",
+    );
   }
 
   return loadStudentUser();
+}
+
+// A new student account. The server checks everything and creates it; then we sign in with the
+// hidden address it answers with. The student only ever sees their phone and username.
+export async function registerStudent({ username, phone, password, school }) {
+  const { login_email: email } = await request("/auth/register", {
+    method: "POST",
+    body: JSON.stringify({
+      username: username.trim(),
+      phone: normalizePhone(phone) ?? phone.trim(),
+      password,
+      school: school.trim(),
+    }),
+  });
+  const { error } = await supabase.auth.signInWithPassword({ email, password });
+  if (error) {
+    // The account exists; only signing in failed (most likely the connection).
+    throw new Error("Your account was created. Please log in with your phone number and password.");
+  }
+  return loadStudentUser();
+}
+
+export async function fetchMyProfile() {
+  const p = await request("/me/profile", { fresh: true });
+  return { username: p.username, phone: p.phone, school: p.school, profileComplete: p.profile_complete };
+}
+
+// Only the fields given are changed.
+export async function updateMyProfile(values) {
+  const body = {};
+  if (values.username !== undefined) body.username = values.username.trim();
+  if (values.phone !== undefined) body.phone = normalizePhone(values.phone) ?? values.phone.trim();
+  if (values.school !== undefined) body.school = values.school.trim();
+  const p = await request("/me/profile", { method: "PATCH", body: JSON.stringify(body) });
+  return { username: p.username, phone: p.phone, school: p.school, profileComplete: p.profile_complete };
 }
 
 function authError(error) {
@@ -309,6 +391,8 @@ export function composeStudent(user, stats) {
     name: stats.name ?? user.name,
     email: user.email,
     role: user.role,
+    username: user.username ?? null,
+    pro: user.pro ?? mapPro(null),
     xp: stats.xp,
     streak: stats.streak,
     weeklyXp: stats.weeklyXp,
@@ -356,6 +440,7 @@ export async function fetchRanking(scope = "class", period = "weekly") {
     return {
       id: row?.id ?? "",
       name: row?.name ?? "",
+      pro: Boolean(row?.pro),
       xp,
       weeklyXp,
       monthlyXp,
@@ -389,6 +474,19 @@ export async function fetchRanking(scope = "class", period = "weekly") {
 
 // ---- Payment requests ------------------------------------------------------
 
+// The Pro plans on offer, cheapest first as the admin ordered them.
+export async function fetchPlans() {
+  const plans = await request("/plans");
+  return (plans ?? []).map((plan) => ({
+    id: plan.id,
+    title: plan.title,
+    price: Number(plan.price),
+    currency: plan.currency ?? "ETB",
+    accessDays: plan.access_days,
+    paymentInstructions: plan.payment_instructions ?? "",
+  }));
+}
+
 export const MAX_PROOF_BYTES = 5 * 1024 * 1024;
 
 // image: what the photo picker returned. Only the image is sent. The server reads the price,
@@ -403,10 +501,23 @@ export async function submitPaymentRequest(courseId, image) {
   return uploadFile(`/courses/${encodeURIComponent(courseId)}/payment-requests`, form);
 }
 
+// Same as a course: only the image is sent; the price comes from the plan on the server.
+export async function submitPlanRequest(planId, image) {
+  const form = new FormData();
+  form.append("proof", {
+    uri: image.uri,
+    name: image.fileName || "payment.jpg",
+    type: image.mimeType || "image/jpeg",
+  });
+  return uploadFile(`/plans/${encodeURIComponent(planId)}/payment-requests`, form);
+}
+
 export async function fetchMyPaymentRequests() {
   const requests = await request("/me/payment-requests");
   return (requests ?? []).map((row) => ({
     id: row.id,
+    kind: row.kind ?? "course",
+    planId: row.plan_id ?? null,
     courseId: row.course_id,
     courseTitle: row.course_title,
     status: row.status,

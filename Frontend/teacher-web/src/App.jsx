@@ -20,6 +20,7 @@ import CourseEditor from "./pages/CourseEditor.jsx";
 import LessonActivities from "./pages/LessonActivities.jsx";
 import Payments from "./pages/Payments.jsx";
 import People from "./pages/People.jsx";
+import Plans from "./pages/Plans.jsx";
 import "./App.css";
 import "./studio.css";
 
@@ -66,6 +67,7 @@ const router = createBrowserRouter([
               },
               { path: "/payments", element: <Payments /> },
               { path: "/people", element: <People /> },
+              { path: "/plans", element: <Plans /> },
               { path: "/content", element: <Content /> },
               { path: "/content/lessons/:lessonId/quiz", element: <QuizEditor /> },
               {

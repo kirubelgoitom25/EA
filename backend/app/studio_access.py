@@ -12,8 +12,10 @@ Seeing, for a student (the course shows up, with its price):
   * a course they hold running access to, so unpublishing never strands a payer.
 Opening, for a student (the content itself):
   * a free course they can see;
-  * a paid course given to their class;
-  * a paid course they hold running access to.
+  * a paid or pro course given to their class;
+  * a paid or pro course they hold running access to (course_access);
+  * a pro course, while their Pro membership is running.
+Pro never opens a paid course, and Pro ending never closes a course they hold access to.
 Seeing never implies opening: old progress keeps a course visible, not open.
 Everything that is not allowed answers 404, so a draft and a missing course look
 the same.
@@ -39,7 +41,7 @@ from app.models import (
     Module,
     Profile,
 )
-from app.payment_rules import ACTIVE, OPEN_STATES, access_state
+from app.payment_rules import ACTIVE, MEMBERSHIP_PRO, OPEN_STATES, access_state, grant_running
 
 
 def admin_clause(user_id: uuid.UUID):
@@ -138,8 +140,9 @@ def _progressed_course_ids(db: Session, student_id: uuid.UUID, course_ids) -> se
 
 
 # Everything about the student that decides what they may see and open, in one round trip:
-# the courses their class has and the access rows they hold. The course list also asks for
-# their waiting payment requests. The courses themselves come from the shared catalogue.
+# the courses their class has, the access rows they hold and their Pro membership. The
+# course list also asks for their waiting payment requests. The courses themselves come
+# from the shared catalogue.
 _FACTS_SQL = """
     select 'class' as kind, course_id,
            cast(null as timestamptz) as expires_at, cast(null as timestamptz) as revoked_at,
@@ -148,11 +151,15 @@ _FACTS_SQL = """
     union all
     select 'access', course_id, expires_at, revoked_at, 0
     from course_access where student_id = :student_id
+    union all
+    select 'pro', null, expires_at, revoked_at, 0
+    from memberships where student_id = :student_id and tier = 'pro'
 """
 _WAITING_SQL = """
     union all
     select 'waiting', course_id, null, null, count(*)
-    from payment_requests where student_id = :student_id and status = 'pending'
+    from payment_requests
+    where student_id = :student_id and status = 'pending' and course_id is not null
     group by course_id
 """
 _FACT_COLUMNS = dict(
@@ -190,12 +197,15 @@ def student_course_views(
     in_class: set[str] = set()
     held: dict[str, tuple] = {}
     waiting: dict[str, int] = {}
+    pro_row = None
     query = FACTS_WITH_WAITING_QUERY if with_waiting else FACTS_QUERY
     for row in db.execute(query, {"class_id": class_id, "student_id": student_id}):
         if row.kind == "class":
             in_class.add(row.course_id)
         elif row.kind == "access":
             held[row.course_id] = (row.expires_at, row.revoked_at)
+        elif row.kind == MEMBERSHIP_PRO:
+            pro_row = (row.expires_at, row.revoked_at)
         else:
             waiting[row.course_id] = int(row.waiting)
 
@@ -209,6 +219,7 @@ def student_course_views(
     progressed = _progressed_course_ids(db, student_id, maybe) if maybe else set()
 
     now = datetime.now(timezone.utc)
+    pro_active = pro_row is not None and grant_running(pro_row[0], pro_row[1], now)
     views = {}
     for course in candidates:
         row = held.get(course.id)
@@ -219,6 +230,8 @@ def student_course_views(
             row[1] if row else None,
             row is not None,
             now,
+            tier=course.access_tier,
+            pro_active=pro_active,
         )
         owned = course.owner_id is not None
         visible = (

@@ -10,12 +10,18 @@ from app.database import get_db
 from app.deps import require_admin
 from app.payment_schemas import (
     GrantIn,
+    MembershipOut,
     OwnerIn,
     PeopleListOut,
     PersonAccessOut,
     PersonDetailOut,
     PersonOut,
     PersonUpdateIn,
+    PlanCreateIn,
+    PlanOut,
+    PlanUpdateIn,
+    ProGrantIn,
+    TemporaryPasswordIn,
 )
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -75,3 +81,60 @@ def grant_access(
     return admin_service.grant_access(
         db, uuid.UUID(current_user["id"]), course_id, student_id, body.access_days
     )
+
+
+def _actor(current_user: dict) -> uuid.UUID:
+    return uuid.UUID(current_user["id"])
+
+
+@router.put("/people/{person_id}/password")
+def set_temporary_password(
+    person_id: uuid.UUID,
+    body: TemporaryPasswordIn,
+    current_user: dict = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    return admin_service.set_temporary_password(db, _actor(current_user), person_id, body.password)
+
+
+@router.put("/people/{person_id}/pro", response_model=MembershipOut)
+def grant_pro(
+    person_id: uuid.UUID,
+    body: ProGrantIn,
+    current_user: dict = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    return admin_service.grant_pro(db, _actor(current_user), person_id, body.access_days)
+
+
+@router.delete("/people/{person_id}/pro", response_model=MembershipOut)
+def revoke_pro(
+    person_id: uuid.UUID,
+    current_user: dict = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    return admin_service.revoke_pro(db, _actor(current_user), person_id)
+
+
+@router.get("/plans", response_model=list[PlanOut])
+def plans(current_user: dict = Depends(require_admin), db: Session = Depends(get_db)):
+    return admin_service.list_plans(db)
+
+
+@router.post("/plans", response_model=PlanOut, status_code=201)
+def create_plan(
+    body: PlanCreateIn,
+    current_user: dict = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    return admin_service.create_plan(db, _actor(current_user), body.model_dump())
+
+
+@router.patch("/plans/{plan_id}", response_model=PlanOut)
+def update_plan(
+    plan_id: str,
+    body: PlanUpdateIn,
+    current_user: dict = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    return admin_service.update_plan(db, _actor(current_user), plan_id, body.model_dump(exclude_none=True))

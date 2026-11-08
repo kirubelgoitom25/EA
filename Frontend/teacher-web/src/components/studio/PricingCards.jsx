@@ -6,18 +6,29 @@ import {
   DURATIONS,
   MAX_INSTRUCTIONS_LEN,
   SOURCE_LABEL,
+  TIERS,
   accessLine,
+  contactLine,
   durationKey,
+  isStricter,
   pricingCheck,
+  tierOf,
 } from "../../lib/payments.js";
 import { friendlyError } from "../../lib/studio.js";
 import { ConfirmDialog, ErrorNote } from "./Parts.jsx";
 
-const isPaid = (course) => Number(course.price) > 0;
+const isPaid = (course) => tierOf(course) === "paid";
 
-// Price, duration and how to pay. A course with no owner has nobody to review payments.
+const STRICTER_TEXT = {
+  "free>paid": ["Start charging for this course?", "Set price", "Students who have not started will need to pay, even if they already added this course on their phone."],
+  "free>pro": ["Make this a Pro course?", "Make Pro", "Students who have not started will need EA Pro to open it."],
+  "pro>paid": ["Start charging for this Pro course?", "Set price", "Pro members who have not started will need to buy it."],
+};
+
+// Free, paid (price, duration and how to pay) or Pro. A course with no owner stays free.
 export function PricingCard({ course, busy, onSave, setDirty }) {
-  const [paid, setPaid] = useState(isPaid(course));
+  const saved = tierOf(course);
+  const [tier, setTier] = useState(saved);
   const [price, setPrice] = useState(isPaid(course) ? String(Number(course.price)) : "");
   const [duration, setDuration] = useState(durationKey(course.access_days));
   const [customDays, setCustomDays] = useState(course.access_days ? String(course.access_days) : "");
@@ -25,10 +36,11 @@ export function PricingCard({ course, busy, onSave, setDirty }) {
   const [confirming, setConfirming] = useState(false);
   const [learners, setLearners] = useState(null);
 
-  const check = pricingCheck({ paid, price, duration, customDays, instructions });
+  const paid = tier === "paid";
+  const check = pricingCheck({ tier, price, duration, customDays, instructions });
   const savedDays = course.access_days ?? null;
   const changed =
-    paid !== isPaid(course) ||
+    tier !== saved ||
     (paid &&
       (Number(price) !== Number(course.price) ||
         check.values?.access_days !== savedDays ||
@@ -42,18 +54,20 @@ export function PricingCard({ course, busy, onSave, setDirty }) {
   if (!course.owner_id) {
     return (
       <section className="card editor-card" aria-label="Pricing">
-        <p className="label">Pricing</p>
+        <p className="label">Access</p>
         <p className="sub">This course has no owner, so it stays free. Nobody could review its payments.</p>
       </section>
     );
   }
 
   const save = () => onSave(check.values);
+  const stricter = isStricter(saved, tier);
+  const text = STRICTER_TEXT[`${saved}>${tier}`];
 
   const submit = async (event) => {
     event.preventDefault();
     if (!changed || !check.ok || busy) return;
-    if (paid && !isPaid(course)) {
+    if (stricter) {
       // Stats are hidden below 3 learners, so the number is a bonus, not a promise.
       setLearners(null);
       studioApi.courseStats(course.id).then((s) => setLearners(s.learners ?? null)).catch(() => {});
@@ -65,15 +79,22 @@ export function PricingCard({ course, busy, onSave, setDirty }) {
 
   return (
     <form className="card editor-card" onSubmit={submit} aria-label="Pricing">
-      <p className="label">Pricing</p>
-      <div className="choice-row" role="radiogroup" aria-label="Free or paid">
-        <label className="choice">
-          <input type="radio" name="paid" checked={!paid} onChange={() => setPaid(false)} /> Free
-        </label>
-        <label className="choice">
-          <input type="radio" name="paid" checked={paid} onChange={() => setPaid(true)} /> Paid
-        </label>
+      <p className="label">Access</p>
+      <div className="choice-row" role="radiogroup" aria-label="Free, paid or Pro">
+        {TIERS.map((t) => (
+          <label className="choice" key={t.key}>
+            <input type="radio" name="tier" checked={tier === t.key} onChange={() => setTier(t.key)} /> {t.label}
+          </label>
+        ))}
       </div>
+      <p className="sub">{TIERS.find((t) => t.key === tier)?.hint}</p>
+
+      {tier === "pro" && (
+        <p className="sub">
+          Students open it while their EA Pro membership is active. Anyone who already bought it, or
+          already started it, keeps it even without Pro.
+        </p>
+      )}
 
       {paid && (
         <>
@@ -115,14 +136,14 @@ export function PricingCard({ course, busy, onSave, setDirty }) {
       {changed && !check.ok && <p className="hint">{check.reason}</p>}
       <div className="form-actions">
         <button type="submit" className="btn" disabled={!changed || !check.ok || busy}>
-          {busy ? "Saving…" : "Save pricing"}
+          {busy ? "Saving…" : "Save"}
         </button>
       </div>
 
       <ConfirmDialog
         open={confirming}
-        title="Start charging for this course?"
-        confirmLabel="Set price"
+        title={text?.[0]}
+        confirmLabel={text?.[1] ?? "Save"}
         busy={busy}
         onCancel={() => setConfirming(false)}
         onConfirm={async () => {
@@ -135,7 +156,7 @@ export function PricingCard({ course, busy, onSave, setDirty }) {
             ? `${learners} students with recorded progress keep access for free, permanently.`
             : "Students with recorded progress keep access for free, permanently."}
         </p>
-        <p>Students who have not started will need to pay, even if they already added this course on their phone.</p>
+        <p>{text?.[2]}</p>
       </ConfirmDialog>
     </form>
   );
@@ -186,7 +207,7 @@ export function PaidStudentsCard({ courseId }) {
           <div className="who">
             <span className="name">{row.student.name}</span>
             <span className="sub">
-              {row.student.email} · {SOURCE_LABEL[row.source] ?? row.source} · {accessLine(row)}
+              {[contactLine(row.student), SOURCE_LABEL[row.source] ?? row.source, accessLine(row)].filter(Boolean).join(" · ")}
             </span>
           </div>
           <span className={`pill${row.state === "active" ? " pill-live" : " pill-cold"}`}>{ACCESS_LABEL[row.state]}</span>

@@ -106,6 +106,7 @@ async def validation_error_handler(request: Request, exc: RequestValidationError
 
 
 app.include_router(auth.router)
+app.include_router(auth.profile_router)
 app.include_router(students.router)
 app.include_router(courses.router)
 app.include_router(quiz.router)

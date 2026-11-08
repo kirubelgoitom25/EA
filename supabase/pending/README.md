@@ -55,3 +55,21 @@ live inside a rolled-back transaction (13/13 checks). Order was: apply this, the
 for every request that sends no submission id (older apps); only submits from the new app,
 which send one, need the column. `submission_ids_rollback.sql` undoes it (deploy the previous
 backend first).
+
+# Accounts and EA Pro: pending SQL (NOT applied)
+
+`20261108000000_accounts_and_pro.sql` adds username and phone to `profiles`, the
+`student_profiles`, `plans` and `memberships` tables, `courses.access_tier` (filled from the price:
+above 0 is paid, the rest free, so nothing opens or closes), `payment_requests.plan_id`, and makes
+the new-account trigger save username, phone and school from `raw_app_meta_data` (only the service
+key can set it). Additive; the only update is the one-time `access_tier` fill.
+
+Apply order, once approved (and only after the tests in `docs/ACCOUNTS_AND_PRO_LAUNCH.md` pass on a
+test project):
+
+1. This file.
+2. Deploy the backend. The ORM models select the new columns, so the backend must be deployed
+   AFTER step 1, never before.
+
+`accounts_and_pro_rollback_pre_use_only.sql` refuses to run once any student has a username or
+phone, or any plan, membership, plan request or Pro course exists.

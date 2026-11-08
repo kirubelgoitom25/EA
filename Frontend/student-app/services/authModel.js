@@ -8,6 +8,10 @@ export const AUTH_REDIRECT = `${AUTH_SCHEME}://auth-callback`;
 // students can always log in with their password. Turn this on when email works.
 export const EMAIL_SIGNUP_OPEN = false;
 
+// Google sign-in is paused (Supabase can't exchange Google's code yet). The code stays; this hides
+// the button. Students join with a username, phone, password and school instead.
+export const GOOGLE_SIGNIN_OPEN = false;
+
 export const MIN_PASSWORD = 8;
 export const MAX_NAME = 60;
 
@@ -75,3 +79,57 @@ export function checkSignUp({ name, email, password }) {
   if (trimmed.length > MAX_NAME) return `Your name can be at most ${MAX_NAME} characters.`;
   return checkEmail(email) || checkPassword(password);
 }
+
+// ---- Phone + username accounts ---------------------------------------------------------------
+// The same rules as the backend (app/account_rules.py), so the form catches mistakes before sending.
+// The server checks again and has the last word.
+
+export const USERNAME_MIN = 3;
+export const USERNAME_MAX = 20;
+export const SCHOOL_MAX = 120;
+export const PHONE_HELP = "Enter an Ethiopian phone number, like 0911 234 567.";
+
+// "+2519XXXXXXXX" from the ways people write it (0911..., 911..., 251911..., +251 911...), or null.
+export function normalizePhone(value) {
+  if (typeof value !== "string") return null;
+  let digits = value.trim().replace(/[\s\-().]/g, "");
+  if (digits.startsWith("+")) {
+    digits = digits.slice(1);
+    if (!digits.startsWith("251")) return null;
+  }
+  if (!/^\d+$/.test(digits)) return null;
+  if (digits.startsWith("251")) digits = digits.slice(3);
+  else if (digits.startsWith("0")) digits = digits.slice(1);
+  const phone = `+251${digits}`;
+  return /^\+251[79]\d{8}$/.test(phone) ? phone : null;
+}
+
+export function checkUsername(value) {
+  const name = (value ?? "").trim().toLowerCase();
+  if (!name) return "Choose a username.";
+  if (name.length < USERNAME_MIN || name.length > USERNAME_MAX) {
+    return `Usernames are ${USERNAME_MIN} to ${USERNAME_MAX} characters.`;
+  }
+  if (!/^[a-z0-9_]+$/.test(name)) return "Use only letters, numbers and _ in your username.";
+  return "";
+}
+
+export function checkPhone(value) {
+  return normalizePhone(value) ? "" : PHONE_HELP;
+}
+
+export function checkSchool(value) {
+  const school = (value ?? "").trim();
+  if (school.length < 2) return "Enter your school or university.";
+  if (school.length > SCHOOL_MAX) return `School name can be at most ${SCHOOL_MAX} characters.`;
+  return "";
+}
+
+// The first problem with the sign-up form, or "".
+export function checkRegister({ username, phone, password, school }) {
+  return checkUsername(username) || checkPhone(phone) || checkPassword(password) || checkSchool(school);
+}
+
+// Students who signed up by phone log in with their phone or username. Older accounts and
+// teachers use an email address.
+export const isEmailLogin = (identifier) => (identifier ?? "").includes("@");

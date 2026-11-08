@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from app import snapshots
 from app.clock import streak_is_live
+from app.snapshots import PRO_BADGE_SQL
 from app.database import get_db
 from app.deps import require_student
 from app.models import Streak
@@ -24,7 +25,7 @@ STATS_QUERY = """
 """
 
 CLASS_RANKING_QUERY = """
-    select p.id, p.name,
+    select p.id, p.name, """ + PRO_BADGE_SQL + """ as pro,
            coalesce(sum(x.amount), 0) as xp,
            coalesce(sum(x.amount) filter (where x.created_at >= now() - interval '7 days'), 0) as weekly_xp,
            coalesce(sum(x.amount) filter (where x.created_at >= now() - interval '30 days'), 0) as monthly_xp
@@ -69,6 +70,7 @@ def national_board(rows, my_id: str, period: str) -> list[dict]:
                     "weekly_xp": row["weekly_xp"],
                     "monthly_xp": row["monthly_xp"],
                     "position": position,
+                    "pro": bool(row.get("pro")),
                 }
             )
     return board
@@ -80,11 +82,15 @@ def _national_rows(db: Session, current_user: dict) -> list:
     always read fresh: their own XP and position are never behind."""
     me = uuid.UUID(current_user["id"])
     mine = db.execute(text(STATS_QUERY), {"student_id": me}).mappings().first()
+    my_pro = db.execute(
+        text("select " + PRO_BADGE_SQL.replace("p.id", ":me")), {"me": me}
+    ).scalar()
     others = [row for row in snapshots.national_totals.get(db) if row["id"] != me]
     return others + [
         {
             "id": me,
             "name": current_user["name"],
+            "pro": bool(my_pro),
             "xp": mine["total_xp"],
             "weekly_xp": mine["weekly_xp"],
             "monthly_xp": mine["monthly_xp"],
@@ -139,6 +145,7 @@ def get_ranking(
             "xp": row["xp"],
             "weekly_xp": row["weekly_xp"],
             "monthly_xp": row["monthly_xp"],
+            "pro": bool(row["pro"]),
         }
         for row in rows
     ]

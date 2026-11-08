@@ -21,13 +21,21 @@ test("sign-in logs say what happened without ever holding a code", () => {
 
 test("with no email provider yet, nothing offers an email code that could never arrive", () => {
   const login = readFileSync(new URL("../components/LoginScreen.js", import.meta.url), "utf8");
-  const gated = login.slice(login.indexOf("EMAIL_SIGNUP_OPEN ?"), login.indexOf("New here? Continue with Google"));
-  assert.match(gated, /Forgot password\?/);
-  assert.match(gated, /Create an account/);
-  // Both exist only inside the switch, and password login stays outside it.
-  assert.equal(login.split('label="Forgot password?"').length, 2);
-  assert.equal(login.split('label="New here? Create an account"').length, 2);
-  assert.ok(login.indexOf('label="Log in"') < login.indexOf("EMAIL_SIGNUP_OPEN ?"));
+  // The email reset is reachable only behind the switch; otherwise the student is told who resets it.
+  assert.equal(login.split('go("forgot")').length, 2);
+  assert.match(login, /EMAIL_SIGNUP_OPEN && identifier\.includes\("@"\)\s*\? \(setEmail\(identifier\.trim\(\)\), go\("forgot"\)\)/);
+  assert.match(login, /set a temporary password for you/);
+  // Email sign-up is never opened from the login form: "Create an account" goes to phone sign-up.
+  assert.equal(login.split('go("signup")').length, 2);
+  assert.ok(login.indexOf('go("signup")') > login.indexOf('mode === "verify"'));
+  assert.match(login, /label="New here\? Create an account" variant="text" onPress=\{\(\) => go\("register"\)\}/);
+});
+
+test("Google sign-in is paused: its button only shows behind the switch", () => {
+  const login = readFileSync(new URL("../components/LoginScreen.js", import.meta.url), "utf8");
+  assert.equal(login.split('label="Continue with Google"').length, 2);
+  const at = login.indexOf('label="Continue with Google"');
+  assert.match(login.slice(at - 200, at), /GOOGLE_SIGNIN_OPEN &&/);
 });
 
 test("only our own callback is treated as a sign-in", () => {

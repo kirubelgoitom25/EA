@@ -25,11 +25,11 @@ from itertools import chain
 from typing import Callable, Optional
 from weakref import WeakKeyDictionary
 
-from sqlalchemy import event, select, text
+from sqlalchemy import Boolean, event, select, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Session
 
-from app.models import Course, Lesson, LessonActivity, Module, Profile, XPEvent
+from app.models import Course, Lesson, LessonActivity, Membership, Module, Profile, XPEvent
 
 MAX_AGE_SECONDS = float(os.getenv("CACHE_SECONDS", "60"))
 
@@ -156,6 +156,7 @@ class CatalogCourse:
     access_days: Optional[int]
     payment_instructions: Optional[str]
     modules: tuple
+    access_tier: str = "free"
 
 
 @dataclass(frozen=True)
@@ -194,7 +195,7 @@ def _load_catalog(db: Session) -> Catalog:
         select(
             Course.id, Course.title, Course.description, Course.sort_order, Course.owner_id,
             Course.status, Course.price, Course.currency, Course.access_days,
-            Course.payment_instructions, Course.created_at,
+            Course.payment_instructions, Course.created_at, Course.access_tier,
         )
     ):
         courses.append(
@@ -211,6 +212,7 @@ def _load_catalog(db: Session) -> Catalog:
                     row.id, row.title, row.description, row.sort_order, row.owner_id, row.status,
                     row.price, row.currency, row.access_days, row.payment_instructions,
                     tuple(modules_by_course.get(row.id, ())),
+                    row.access_tier,
                 ),
             )
         )
@@ -231,8 +233,16 @@ catalog = SharedSnapshot("catalog", _load_catalog, (Course, Module, Lesson, Less
 
 # ---- the national XP board ---------------------------------------------------------------------
 
+# Running Pro, for the badge beside a name. Cached with the board, so a membership that
+# just ended can show for up to CACHE_SECONDS more; it opens nothing, so that is harmless.
+PRO_BADGE_SQL = """exists (
+        select 1 from public.memberships m
+        where m.student_id = p.id and m.tier = 'pro' and m.revoked_at is null
+          and (m.expires_at is null or m.expires_at > now())
+    )"""
+
 NATIONAL_TOTALS_QUERY = text("""
-    select p.id, p.name,
+    select p.id, p.name, """ + PRO_BADGE_SQL + """ as pro,
            coalesce(sum(x.amount), 0) as xp,
            coalesce(sum(x.amount) filter (where x.created_at >= now() - interval '7 days'), 0) as weekly_xp,
            coalesce(sum(x.amount) filter (where x.created_at >= now() - interval '30 days'), 0) as monthly_xp
@@ -240,7 +250,7 @@ NATIONAL_TOTALS_QUERY = text("""
     left join public.xp_events x on x.student_id = p.id
     where p.role = 'student' and p.is_active
     group by p.id, p.name
-""").columns(id=UUID(as_uuid=True))
+""").columns(id=UUID(as_uuid=True), pro=Boolean)
 
 
 def _load_national_totals(db: Session) -> tuple:
@@ -248,4 +258,6 @@ def _load_national_totals(db: Session) -> tuple:
 
 
 # New XP, and any profile change (a rename, a turned-off account), rebuild it.
-national_totals = SharedSnapshot("national_totals", _load_national_totals, (XPEvent, Profile))
+national_totals = SharedSnapshot(
+    "national_totals", _load_national_totals, (XPEvent, Profile, Membership)
+)

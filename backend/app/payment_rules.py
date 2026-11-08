@@ -5,10 +5,19 @@ from typing import Optional
 
 from app.content_rules import ContentError, clean_text
 
-# What a student's relationship to a course can be. The first three open the content.
-FREE, CLASS, ACTIVE = "free", "class", "active"
-EXPIRED, REVOKED, LOCKED = "expired", "revoked", "locked"
-OPEN_STATES = (FREE, CLASS, ACTIVE)
+# What a student's relationship to a course can be. OPEN_STATES open the content.
+FREE, CLASS, ACTIVE, PRO = "free", "class", "active", "pro"
+EXPIRED, REVOKED, LOCKED, PRO_LOCKED = "expired", "revoked", "locked", "pro_locked"
+OPEN_STATES = (FREE, CLASS, ACTIVE, PRO)
+
+# How a course is offered. Only a paid course has a price.
+TIER_FREE, TIER_PAID, TIER_PRO = "free", "paid", "pro"
+TIERS = (TIER_FREE, TIER_PAID, TIER_PRO)
+# Moving a course along one of these makes it harder to open, so students who already
+# started it keep it (see studio_service._keep_existing_learners).
+STRICTER = {(TIER_FREE, TIER_PAID), (TIER_FREE, TIER_PRO), (TIER_PRO, TIER_PAID)}
+
+MEMBERSHIP_PRO = "pro"
 
 PENDING, APPROVED, REJECTED = "pending", "approved", "rejected"
 
@@ -32,6 +41,18 @@ def aware(value: Optional[datetime]) -> Optional[datetime]:
     return value
 
 
+def tier_of(price, tier: Optional[str] = None) -> str:
+    """The course's access option. Without one (older callers), the price decides."""
+    if tier in TIERS:
+        return tier
+    return TIER_PAID if price else TIER_FREE
+
+
+def grant_running(expires_at: Optional[datetime], revoked_at: Optional[datetime], now: datetime) -> bool:
+    """A course_access or membership row that still counts right now."""
+    return revoked_at is None and (expires_at is None or aware(expires_at) > now)
+
+
 def access_state(
     price,
     in_class: bool,
@@ -39,14 +60,39 @@ def access_state(
     revoked_at: Optional[datetime],
     has_row: bool,
     now: datetime,
+    tier: Optional[str] = None,
+    pro_active: bool = False,
 ) -> str:
-    """Why a student can or cannot open a course. Free and class access need no row."""
-    if not price:
+    """Why a student can or cannot open a course. Free and class access need no row.
+
+    The course_access row (expires_at, revoked_at, has_row) and Pro are independent:
+      * a paid course never looks at Pro, so Pro can neither open nor close it;
+      * a pro course opens through a running course_access row first (bought before it
+        became Pro, kept as an existing learner, or given by the admin), then through Pro.
+        Pro ending falls back to that row; it never removes it.
+    """
+    tier = tier_of(price, tier)
+    if tier == TIER_FREE:
         return FREE
     if in_class:
         return CLASS
+    if tier == TIER_PRO:
+        if has_row and grant_running(expires_at, revoked_at, now):
+            return ACTIVE
+        return PRO if pro_active else PRO_LOCKED
     if not has_row:
         return LOCKED
+    if revoked_at is not None:
+        return REVOKED
+    if expires_at is None or aware(expires_at) > now:
+        return ACTIVE
+    return EXPIRED
+
+
+def membership_state(has_row: bool, expires_at: Optional[datetime], revoked_at: Optional[datetime], now: datetime) -> str:
+    """none, active, expired or revoked: a Pro membership on its own."""
+    if not has_row:
+        return "none"
     if revoked_at is not None:
         return REVOKED
     if expires_at is None or aware(expires_at) > now:
@@ -101,6 +147,12 @@ def clean_access_days(value) -> Optional[int]:
 
 def clean_instructions(value) -> Optional[str]:
     return clean_text(value, "Payment instructions", MAX_INSTRUCTIONS_LEN, required=False)
+
+
+def clean_tier(value) -> str:
+    if value not in TIERS:
+        raise ContentError("Choose free, paid or pro")
+    return value
 
 
 def clean_note(value) -> Optional[str]:

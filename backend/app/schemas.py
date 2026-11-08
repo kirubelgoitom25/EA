@@ -8,12 +8,41 @@ from pydantic import BaseModel, Field
 Role = Literal["student", "teacher"]
 
 
+class ProStatusOut(BaseModel):
+    state: str  # none, active, expired or revoked
+    active: bool
+    expires_at: Optional[datetime] = None
+    source: Optional[str] = None
+
+
 class UserOut(BaseModel):
     id: str
     name: str
     email: str
     role: Role
     is_admin: bool = False
+    # Students only.
+    username: Optional[str] = None
+    phone: Optional[str] = None
+    profile_complete: Optional[bool] = None
+    pro: Optional[ProStatusOut] = None
+
+
+class RegisteredOut(BaseModel):
+    # The hidden address the app signs in with. Never shown to the student.
+    login_email: str
+
+
+class LoginEmailOut(BaseModel):
+    email: str
+
+
+class MyProfileOut(BaseModel):
+    name: str
+    username: Optional[str] = None
+    phone: Optional[str] = None
+    school: Optional[str] = None
+    profile_complete: bool
 
 
 class StudentOut(BaseModel):
@@ -40,7 +69,7 @@ class ModuleOut(BaseModel):
 
 
 class CourseAccessOut(BaseModel):
-    # free, class, active, expired, revoked or locked
+    # free, class, active, pro (open) or expired, revoked, locked, pro_locked (closed)
     state: str
     expires_at: Optional[datetime] = None
     pending_requests: int = 0
@@ -57,6 +86,7 @@ class CourseListItemOut(BaseModel):
     currency: str = "ETB"
     access_days: Optional[int] = None
     payment_instructions: Optional[str] = None
+    access_tier: str = "free"
     purchasable: bool = True
     # Students only. Absent for teachers, who are not buying anything.
     access: Optional[CourseAccessOut] = None
@@ -71,6 +101,7 @@ class CourseDetailOut(BaseModel):
     currency: str = "ETB"
     access_days: Optional[int] = None
     payment_instructions: Optional[str] = None
+    access_tier: str = "free"
     purchasable: bool = True
     access: Optional[CourseAccessOut] = None
     modules: list[ModuleOut]
@@ -166,6 +197,7 @@ class RankingEntryOut(BaseModel):
     weekly_xp: Decimal
     monthly_xp: Decimal
     position: Optional[int] = None
+    pro: bool = False
 
 class ClassOut(BaseModel):
     id: str

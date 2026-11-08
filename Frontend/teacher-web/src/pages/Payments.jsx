@@ -3,12 +3,26 @@ import { ChevronDown, ChevronUp } from "lucide-react";
 import { useAuth } from "../auth/AuthContext.jsx";
 import { ConfirmDialog, ErrorNote, Flash } from "../components/studio/Parts.jsx";
 import { Tabs } from "../components/ui.jsx";
-import { MAX_NOTE_LEN, durationLabel, formatDate, money, reviewWarnings } from "../lib/payments.js";
+import {
+  MAX_NOTE_LEN,
+  contactLine,
+  durationLabel,
+  formatDate,
+  isPlanRequest,
+  money,
+  requestTitle,
+  reviewWarnings,
+} from "../lib/payments.js";
 import { adminApi, paymentsApi } from "../lib/paymentsApi.js";
 import { friendlyError, timeAgo } from "../lib/studio.js";
 import { studioApi } from "../lib/studioApi.js";
 
 const PAGE = 50;
+const KINDS = [
+  { key: "", label: "All requests" },
+  { key: "course", label: "Courses" },
+  { key: "plan", label: "EA Pro" },
+];
 const STATUS_TABS = [
   { key: "pending", label: "Pending" },
   { key: "approved", label: "Approved" },
@@ -58,9 +72,9 @@ export function RequestDetail({ item, busy, onApprove, onReject }) {
       <div className="request-side">
         <dl className="facts">
           <dt>Student</dt>
-          <dd>{item.student.name}<br /><span className="sub">{item.student.email}</span></dd>
-          <dt>Course</dt>
-          <dd>{item.course.title}</dd>
+          <dd>{item.student.name}<br /><span className="sub">{contactLine(item.student)}</span></dd>
+          <dt>{isPlanRequest(item) ? "EA Pro" : "Course"}</dt>
+          <dd>{requestTitle(item)}</dd>
           <dt>Amount</dt>
           <dd>{money(item.amount, item.currency)}</dd>
           <dt>Access</dt>
@@ -112,7 +126,10 @@ export function RequestRow({ item, open, onToggle, children }) {
       <button type="button" className="row request-head" onClick={() => onToggle(item.id)} aria-expanded={open}>
         <div className="who">
           <span className="name">{item.student.name}</span>
-          <span className="sub">{item.course.title} · {money(item.amount, item.currency)} · {durationLabel(item.access_days)}</span>
+          <span className="sub">
+            {isPlanRequest(item) ? "EA Pro · " : ""}
+            {requestTitle(item)} · {money(item.amount, item.currency)} · {durationLabel(item.access_days)}
+          </span>
         </div>
         <span className="sub">{timeAgo(item.created_at)}</span>
         {open ? <ChevronUp size={18} aria-hidden="true" /> : <ChevronDown size={18} aria-hidden="true" />}
@@ -128,6 +145,7 @@ export default function Payments() {
   const [status, setStatus] = useState("pending");
   const [courseId, setCourseId] = useState("");
   const [teacherId, setTeacherId] = useState("");
+  const [kind, setKind] = useState("");
   const [courses, setCourses] = useState([]);
   const [teachers, setTeachers] = useState([]);
   const [data, setData] = useState(null);
@@ -143,12 +161,13 @@ export default function Payments() {
         status,
         course_id: courseId,
         teacher_id: teacherId,
+        kind,
         limit: PAGE,
         offset,
       });
       setData((current) => (offset ? { ...page, items: [...current.items, ...page.items] } : page));
     },
-    [status, courseId, teacherId],
+    [status, courseId, teacherId, kind],
   );
 
   useEffect(() => {
@@ -181,7 +200,10 @@ export default function Payments() {
 
   const approve = async () => {
     const item = approving;
-    await act(() => paymentsApi.approve(item.id), `Approved. ${item.student.name} now has access.`);
+    await act(
+      () => paymentsApi.approve(item.id),
+      isPlanRequest(item) ? `Approved. ${item.student.name} now has EA Pro.` : `Approved. ${item.student.name} now has access.`,
+    );
     setApproving(null);
   };
   const reject = (item, note) => act(() => paymentsApi.reject(item.id, note), "Rejected. The student can send another request.");
@@ -194,7 +216,7 @@ export default function Payments() {
           <p className="label">Payments</p>
           <h1>Payment requests</h1>
           <p className="sub">
-            {isAdmin ? "Every request on EA." : "Requests for your courses."}
+            {isAdmin ? "Every request on EA, including EA Pro." : "Requests for your courses."}
             {data ? ` ${data.pending_total} waiting.` : ""}
           </p>
         </div>
@@ -206,6 +228,13 @@ export default function Payments() {
       <Tabs tabs={STATUS_TABS} value={status} onChange={setStatus} />
 
       <div className="filter-row">
+        {isAdmin && (
+          <select className="input" value={kind} onChange={(e) => setKind(e.target.value)} aria-label="Filter by type">
+            {KINDS.map((k) => (
+              <option key={k.key} value={k.key}>{k.label}</option>
+            ))}
+          </select>
+        )}
         <select className="input" value={courseId} onChange={(e) => setCourseId(e.target.value)} aria-label="Filter by course">
           <option value="">All courses</option>
           {courses.map((c) => (
@@ -251,8 +280,8 @@ export default function Payments() {
       >
         <p>
           {after?.permanent
-            ? `They get permanent access to ${approving?.course.title}.`
-            : `They get ${approving?.course.title} until ${formatDate(after?.expires_at)}.`}
+            ? `They get permanent ${isPlanRequest(approving) ? "EA Pro" : `access to ${requestTitle(approving)}`}.`
+            : `They get ${isPlanRequest(approving) ? "EA Pro" : requestTitle(approving)} until ${formatDate(after?.expires_at)}.`}
         </p>
       </ConfirmDialog>
     </div>

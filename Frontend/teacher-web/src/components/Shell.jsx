@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, Outlet, useLocation } from "react-router-dom";
-import { BookOpen, LayoutGrid, LogOut, PenLine, Receipt, Trophy, Users } from "lucide-react";
+import { BookOpen, LayoutGrid, LogOut, PenLine, Receipt, Sparkles, Trophy, Users } from "lucide-react";
 import { useAuth } from "../auth/AuthContext.jsx";
 import { paymentsApi } from "../lib/paymentsApi.js";
 import { PAYMENTS_CHANGED } from "../pages/Payments.jsx";
@@ -15,6 +15,7 @@ export default function Shell() {
   const studioActive = pathname.startsWith("/studio");
   const paymentsActive = pathname.startsWith("/payments");
   const peopleActive = pathname.startsWith("/people");
+  const plansActive = pathname.startsWith("/plans");
   const [waiting, setWaiting] = useState(0);
 
   // The count is a convenience, so a failure just leaves it as it was.
@@ -34,7 +35,7 @@ export default function Shell() {
   }, [pathname]);
 
   return (
-    <div className={`shell${studioActive || paymentsActive || peopleActive ? " studio-theme" : ""}`}>
+    <div className={`shell${studioActive || paymentsActive || peopleActive || plansActive ? " studio-theme" : ""}`}>
       <aside className="sidebar">
         <div className="brand">
           <span className="brand-badge">EA</span>
@@ -86,6 +87,15 @@ export default function Shell() {
             >
               <Users size={20} />
               <span>People</span>
+            </Link>
+          )}
+          {profile?.is_admin && (
+            <Link
+              to="/plans"
+              className={`nav-item${plansActive ? " active" : ""}`}
+            >
+              <Sparkles size={20} />
+              <span>EA Pro</span>
             </Link>
           )}
         </nav>

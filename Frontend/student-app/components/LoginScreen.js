@@ -10,7 +10,17 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { checkEmail, checkPassword, checkSignUp, EMAIL_SIGNUP_OPEN, MAX_NAME } from "../services/authModel";
+import {
+  checkEmail,
+  checkPassword,
+  checkRegister,
+  checkSignUp,
+  EMAIL_SIGNUP_OPEN,
+  GOOGLE_SIGNIN_OPEN,
+  MAX_NAME,
+  SCHOOL_MAX,
+  USERNAME_MAX,
+} from "../services/authModel";
 import { layout, space, tokens, type } from "../theme";
 import AppText from "./ui/AppText";
 import Button from "./ui/Button";
@@ -19,6 +29,7 @@ import Fox from "./ui/Fox";
 const TITLES = {
   start: ["Welcome to EA", "Your trail is waiting."],
   login: ["Welcome back", "Your trail is waiting."],
+  register: ["Create your account", "Free courses open right away."],
   signup: ["Create your account", "Free courses open right away."],
   verify: ["Check your email", "Enter the code we sent you."],
   forgot: ["Forgot your password?", "We'll email you a code."],
@@ -26,7 +37,7 @@ const TITLES = {
 };
 
 // One text box with its label, so every field looks and behaves the same.
-function Field({ id, label, focused, setFocused, inputRef, ...input }) {
+export function Field({ id, label, focused, setFocused, inputRef, ...input }) {
   return (
     <>
       <AppText variant="label" tone="secondary" style={styles.label} nativeID={`${id}Label`}>
@@ -46,13 +57,18 @@ function Field({ id, label, focused, setFocused, inputRef, ...input }) {
   );
 }
 
-// Getting in, all on one screen: Google first, or a small email form. There's nothing else to fill
-// in. Errors are shown by App.js, which owns the calls.
-export default function LoginScreen({ onLogin, onGoogle, onSignUp, onVerify, onResend, onForgot, onReset }) {
+// Getting in, all on one screen. New students give a username, phone, password and school; anyone
+// logs in with their phone or username (older accounts with their email). Errors are shown by
+// App.js, which owns the calls. Google and the email sign-up flows stay behind their flags.
+export default function LoginScreen({ onLogin, onRegister, onGoogle, onSignUp, onVerify, onResend, onForgot, onReset }) {
   const insets = useSafeAreaInsets();
   const [mode, setMode] = useState("start");
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
+  const [identifier, setIdentifier] = useState("");
+  const [username, setUsername] = useState("");
+  const [phone, setPhone] = useState("");
+  const [school, setSchool] = useState("");
   const [password, setPassword] = useState("");
   const [code, setCode] = useState("");
   const [notice, setNotice] = useState("");
@@ -62,6 +78,8 @@ export default function LoginScreen({ onLogin, onGoogle, onSignUp, onVerify, onR
   const [focused, setFocused] = useState(null);
   const passwordRef = useRef(null);
   const emailRef = useRef(null);
+  const phoneRef = useRef(null);
+  const schoolRef = useRef(null);
   const scrollRef = useRef(null);
   const trimmedEmail = email.trim();
 
@@ -109,11 +127,31 @@ export default function LoginScreen({ onLogin, onGoogle, onSignUp, onVerify, onR
 
   const login = () =>
     run(async () => {
-      if ((await onLogin({ email, password })) === "verify") {
-        await onResend(trimmedEmail);
+      if ((await onLogin({ identifier, password })) === "verify") {
+        setEmail(identifier.trim());
+        await onResend(identifier.trim());
         go("verify", "Confirm your email first. We've sent you a new code.");
       }
     });
+
+  const register = () => {
+    const problem = checkRegister({ username, phone, password, school });
+    if (problem) return setNotice(problem);
+    setNotice("");
+    return run(async () => {
+      const outcome = await onRegister({ username, phone, password, school });
+      if (outcome === "login") {
+        setIdentifier(phone);
+        go("login", "Your account is ready. Log in with your phone number and password.");
+      }
+    });
+  };
+
+  // No email or SMS yet, so a forgotten password is reset by EA by hand.
+  const forgotPassword = () =>
+    EMAIL_SIGNUP_OPEN && identifier.includes("@")
+      ? (setEmail(identifier.trim()), go("forgot"))
+      : setNotice("Ask your teacher or EA support to set a temporary password for you. You can log in with it straight away.");
 
   const signUp = () => {
     const problem = checkSignUp({ name, email, password });
@@ -220,36 +258,111 @@ export default function LoginScreen({ onLogin, onGoogle, onSignUp, onVerify, onR
             </AppText>
           ) : null}
 
-          {mode === "start" || mode === "login" || mode === "signup" ? (
+          {GOOGLE_SIGNIN_OPEN && (mode === "start" || mode === "login" || mode === "signup") ? (
             <Button label="Continue with Google" icon="logo-google" onPress={google} loading={googling} disabled={submitting} />
           ) : null}
 
           {mode === "start" ? (
             <>
-              <View style={styles.divider}>
-                <View style={styles.line} />
-                <AppText variant="caption" tone="secondary">or</AppText>
-                <View style={styles.line} />
-              </View>
-              <Button label="Continue with email" variant="text" onPress={() => go("login")} disabled={googling} />
+              {GOOGLE_SIGNIN_OPEN ? (
+                <View style={styles.divider}>
+                  <View style={styles.line} />
+                  <AppText variant="caption" tone="secondary">or</AppText>
+                  <View style={styles.line} />
+                </View>
+              ) : null}
+              <Button
+                label="Create account"
+                variant={GOOGLE_SIGNIN_OPEN ? "text" : undefined}
+                onPress={() => go("register")}
+                disabled={googling}
+              />
+              <Button label="I already have an account" variant="text" onPress={() => go("login")} disabled={googling} style={styles.link} />
+            </>
+          ) : null}
+
+          {mode === "register" ? (
+            <>
+              <Field
+                {...fieldProps}
+                id="username"
+                label="Username"
+                placeholder="e.g. liya_a"
+                value={username}
+                onChangeText={setUsername}
+                maxLength={USERNAME_MAX}
+                autoCapitalize="none"
+                autoCorrect={false}
+                autoComplete="username-new"
+                textContentType="username"
+                returnKeyType="next"
+                blurOnSubmit={false}
+                onSubmitEditing={() => phoneRef.current?.focus()}
+              />
+              <AppText variant="caption" tone="secondary" style={styles.hint}>
+                Shown on rankings. Letters, numbers and _.
+              </AppText>
+              <Field
+                {...fieldProps}
+                id="phone"
+                label="Phone number"
+                inputRef={phoneRef}
+                placeholder="0911 234 567"
+                value={phone}
+                onChangeText={setPhone}
+                keyboardType="phone-pad"
+                autoComplete="tel"
+                textContentType="telephoneNumber"
+                returnKeyType="next"
+                blurOnSubmit={false}
+                onSubmitEditing={() => passwordRef.current?.focus()}
+              />
+              {passwordField(() => schoolRef.current?.focus(), true)}
+              <Field
+                {...fieldProps}
+                id="school"
+                label="School or university"
+                inputRef={schoolRef}
+                placeholder="e.g. Addis Ababa University"
+                value={school}
+                onChangeText={setSchool}
+                maxLength={SCHOOL_MAX}
+                autoCapitalize="words"
+                returnKeyType="done"
+                onSubmitEditing={register}
+              />
+              <Button
+                label="Create account"
+                onPress={register}
+                disabled={!username || !phone || !password || !school}
+                loading={submitting}
+                style={styles.button}
+              />
+              <Button label="Already have an account? Log in" variant="text" onPress={() => go("login")} style={styles.link} />
             </>
           ) : null}
 
           {mode === "login" ? (
             <>
-              {emailField}
+              <Field
+                {...fieldProps}
+                id="identifier"
+                label="Phone number or username"
+                placeholder="0911 234 567"
+                value={identifier}
+                onChangeText={setIdentifier}
+                autoCapitalize="none"
+                autoCorrect={false}
+                autoComplete="username"
+                textContentType="username"
+                returnKeyType="next"
+                blurOnSubmit={false}
+                onSubmitEditing={() => passwordRef.current?.focus()}
+              />
               {passwordField(login, false)}
-              <Button label="Log in" onPress={login} disabled={!email || !password} loading={submitting} style={styles.button} />
-              {EMAIL_SIGNUP_OPEN ? (
-                <>
-                  <Button label="Forgot password?" variant="text" onPress={() => go("forgot")} style={styles.link} />
-                  <Button label="New here? Create an account" variant="text" onPress={() => go("signup")} />
-                </>
-              ) : (
-                <AppText variant="caption" tone="secondary" style={styles.newHere}>
-                  New here? Continue with Google to get started.
-                </AppText>
-              )}
+              <Button label="Log in" onPress={login} disabled={!identifier || !password} loading={submitting} style={styles.button} />
+              <Button label="Forgot your password?" variant="text" onPress={forgotPassword} style={styles.link} />
+              <Button label="New here? Create an account" variant="text" onPress={() => go("register")} />
             </>
           ) : null}
 
@@ -376,9 +489,8 @@ const styles = StyleSheet.create({
     marginTop: space.sm,
   },
 
-  newHere: {
-    marginTop: space.xl,
-    textAlign: "center",
+  hint: {
+    marginTop: space.xs,
   },
 
   notice: {

@@ -6,6 +6,7 @@ import Svg, { Path } from "react-native-svg";
 import { layout, space, TAIL, tokens } from "../theme";
 import BottomNavBar from "./BottomNavBar";
 import { displayName, rankEntries } from "./rankingModel";
+import { ProBadge } from "./ProScreen";
 import AppText from "./ui/AppText";
 import EmptyState from "./ui/EmptyState";
 import Header from "./ui/Header";
@@ -229,9 +230,12 @@ function Row({ entry, name, divider = false }) {
       <AppText variant="label" tone={entry.isYou ? "accent" : "secondary"} style={styles.position}>
         {entry.position}
       </AppText>
-      <AppText variant="bodyStrong" style={styles.flex} numberOfLines={1}>
-        {name}
-      </AppText>
+      <View style={[styles.flex, styles.nameRow]}>
+        <AppText variant="bodyStrong" style={styles.nameText} numberOfLines={1}>
+          {name}
+        </AppText>
+        {entry.pro ? <ProBadge small /> : null}
+      </View>
       <AppText variant="label" tone="secondary">
         {entry.periodXp} XP
       </AppText>
@@ -246,6 +250,16 @@ const styles = StyleSheet.create({
 
   flex: {
     flex: 1,
+  },
+
+  nameRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+
+  nameText: {
+    flexShrink: 1,
   },
 
   segment: {

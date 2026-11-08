@@ -17,6 +17,7 @@ from app.payment_rules import MAX_PROOF_BYTES
 from app.payment_schemas import (
     AccessRowOut,
     MyPaymentRequestOut,
+    PlanOut,
     RejectIn,
     ReviewListOut,
     ReviewRequestOut,
@@ -55,6 +56,31 @@ def submit_payment_request(
     return result
 
 
+@student_router.get("/plans", response_model=list[PlanOut])
+def plans(current_user: dict = Depends(require_student), db: Session = Depends(get_db)):
+    """The Pro plans on offer."""
+    return payment_service.active_plans(db)
+
+
+@student_router.post(
+    "/plans/{plan_id}/payment-requests",
+    response_model=MyPaymentRequestOut,
+    status_code=201,
+)
+def submit_plan_request(
+    plan_id: str,
+    response: Response,
+    proof: UploadFile = File(...),
+    current_user: dict = Depends(require_student),
+    db: Session = Depends(get_db),
+):
+    data = proof.file.read(MAX_PROOF_BYTES + 1)
+    result, created = payment_service.submit_plan_request(db, _uid(current_user), plan_id, data)
+    if not created:
+        response.status_code = 200
+    return result
+
+
 @student_router.get("/me/payment-requests", response_model=list[MyPaymentRequestOut])
 def my_payment_requests(
     current_user: dict = Depends(require_student), db: Session = Depends(get_db)
@@ -70,13 +96,14 @@ def payment_requests(
     status: Optional[Literal["pending", "approved", "rejected"]] = Query(None),
     course_id: Optional[str] = Query(None),
     teacher_id: Optional[uuid.UUID] = Query(None),
+    kind: Optional[Literal["course", "plan"]] = Query(None),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     current_user: dict = Depends(require_teacher),
     db: Session = Depends(get_db),
 ):
     return payment_service.list_for_review(
-        db, _uid(current_user), status, course_id, teacher_id, limit, offset
+        db, _uid(current_user), status, course_id, teacher_id, limit, offset, kind
     )
 
 

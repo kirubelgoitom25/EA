@@ -2,7 +2,8 @@ import React from "react";
 import { StyleSheet, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 
-import { buyLabel, dateText, durationText, money } from "../services/access";
+import { buyLabel, dateText, durationText, isProCourse, money, proButtonLabel } from "../services/access";
+import { ProBadge } from "./ProScreen";
 import { layout, space, tokens } from "../theme";
 import { flattenChapters } from "./session/sessionModel";
 import AppText from "./ui/AppText";
@@ -13,15 +14,22 @@ import Screen from "./ui/Screen";
 
 // A paid course the student can't open yet: what it is, what it costs, how long it lasts, and what's
 // inside. The chapter titles sell it. The content itself never reaches the phone until it's open.
-export default function LockedCourseScreen({ course, backLabel, onBack, onBuy, onRequests }) {
+// A Pro course offers EA Pro instead of a price.
+export default function LockedCourseScreen({ course, pro, backLabel, onBack, onBuy, onPro, onRequests }) {
   const chapters = flattenChapters(course);
   const access = course.access ?? {};
   const waiting = access.pendingRequests > 0;
   const onSale = course.purchasable !== false;
+  const proCourse = isProCourse(course);
 
   return (
     <Screen
       footer={
+        proCourse ? (
+          <View style={styles.footer}>
+            <Button label={proButtonLabel(pro)} onPress={onPro} icon="sparkles-outline" />
+          </View>
+        ) : (
         <View style={styles.footer}>
           {!onSale ? (
             <AppText variant="caption" tone="secondary" style={styles.waiting}>
@@ -34,17 +42,37 @@ export default function LockedCourseScreen({ course, backLabel, onBack, onBuy, o
           ) : null}
           {onSale ? <Button label={buyLabel(course)} onPress={onBuy} icon="lock-open-outline" /> : null}
         </View>
+        )
       }
     >
       <Header title={course.title} backLabel={backLabel} onBack={onBack} />
 
       <View style={styles.top}>
         <Emblem course={course} size={56} radius={17} />
-        <View style={styles.price}>
-          <AppText variant="title">{money(course.price, course.currency)}</AppText>
-          <AppText tone="secondary">{durationText(course.accessDays)}</AppText>
-        </View>
+        {proCourse ? (
+          <View style={styles.price}>
+            <View style={styles.proRow}>
+              <ProBadge />
+              <AppText variant="title">EA Pro</AppText>
+            </View>
+            <AppText tone="secondary">Included with EA Pro</AppText>
+          </View>
+        ) : (
+          <View style={styles.price}>
+            <AppText variant="title">{money(course.price, course.currency)}</AppText>
+            <AppText tone="secondary">{durationText(course.accessDays)}</AppText>
+          </View>
+        )}
       </View>
+
+      {proCourse && pro?.state === "expired" ? (
+        <Note icon="time-outline">
+          Your Pro ended{pro.expiresAt ? ` on ${dateText(pro.expiresAt)}` : ""}. Your progress is safe. Renew Pro to pick up where you left off.
+        </Note>
+      ) : null}
+      {proCourse && pro?.state === "revoked" ? (
+        <Note icon="alert-circle-outline">Your Pro was removed. Your progress is safe.</Note>
+      ) : null}
 
       {access.state === "expired" ? (
         <Note icon="time-outline">
@@ -88,6 +116,7 @@ function Note({ icon, children }) {
 const styles = StyleSheet.create({
   top: { flexDirection: "row", alignItems: "center", gap: space.lg, marginTop: space.md },
   price: { flex: 1 },
+  proRow: { flexDirection: "row", alignItems: "center", gap: space.sm },
   description: { marginTop: space.lg },
   link: { marginTop: space.sm, alignSelf: "flex-start" },
   section: { marginTop: space.xl, marginBottom: space.sm },

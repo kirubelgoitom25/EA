@@ -32,6 +32,10 @@ class Profile(Base):
     # The main admin stays role "teacher" with this on, so every teacher route and the
     # dashboard login work unchanged. Set by hand in SQL; no API can write it.
     is_admin = Column(Boolean, nullable=False, default=False, server_default="false")
+    # Students who signed up with a phone. Stored in one form only: lowercase username,
+    # +251 phone. Teachers and older email accounts have neither.
+    username = Column(String, nullable=True, unique=True)
+    phone = Column(String, nullable=True, unique=True)
     created_at = Column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
@@ -63,6 +67,8 @@ class Course(Base):
     currency = Column(String, nullable=False, default="ETB", server_default="ETB")
     access_days = Column(Integer, nullable=True)
     payment_instructions = Column(Text, nullable=True)
+    # free, paid or pro. Only a paid course has a price (a database rule).
+    access_tier = Column(String, nullable=False, default="free", server_default="free")
 
     modules = relationship(
         "Module", back_populates="course", order_by="Module.sort_order"
@@ -368,7 +374,9 @@ class PaymentRequest(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     # No cascade: payment history must never vanish with a course or an account.
     student_id = Column(UUID(as_uuid=True), ForeignKey("profiles.id"), nullable=False)
-    course_id = Column(String, ForeignKey("courses.id"), nullable=False)
+    # Exactly one of these: a course or a Pro plan (a database rule).
+    course_id = Column(String, ForeignKey("courses.id"), nullable=True)
+    plan_id = Column(String, ForeignKey("plans.id"), nullable=True)
     status = Column(String, nullable=False, default="pending", server_default="pending")
     amount = Column(Numeric(10, 2), nullable=False)
     currency = Column(String, nullable=False)
@@ -402,6 +410,61 @@ class CourseAccess(Base):
     granted_at = Column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
+    source = Column(String, nullable=False)
+    granted_by = Column(
+        UUID(as_uuid=True), ForeignKey("profiles.id", ondelete="SET NULL"), nullable=True
+    )
+    revoked_at = Column(DateTime(timezone=True), nullable=True)
+    revoked_by = Column(
+        UUID(as_uuid=True), ForeignKey("profiles.id", ondelete="SET NULL"), nullable=True
+    )
+
+
+class StudentProfile(Base):
+    """What a student tells us about themselves. Later attributes are new nullable columns."""
+
+    __tablename__ = "student_profiles"
+
+    student_id = Column(
+        UUID(as_uuid=True), ForeignKey("profiles.id", ondelete="CASCADE"), primary_key=True
+    )
+    school = Column(Text, nullable=True)
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class Plan(Base):
+    """A Pro offer set by the admin: what it costs and how long it lasts."""
+
+    __tablename__ = "plans"
+
+    id = Column(String, primary_key=True)
+    tier = Column(String, nullable=False, default="pro", server_default="pro")
+    title = Column(String, nullable=False)
+    price = Column(Numeric(10, 2), nullable=False)
+    currency = Column(String, nullable=False, default="ETB", server_default="ETB")
+    access_days = Column(Integer, nullable=False)
+    payment_instructions = Column(Text, nullable=False)
+    is_active = Column(Boolean, nullable=False, default=True, server_default="true")
+    sort_order = Column(Integer, nullable=False, default=0, server_default="0")
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class Membership(Base):
+    """A student's Pro membership, kept exactly like CourseAccess. It never reads or writes
+    course_access: Pro ending can never take away a course the student bought.
+
+    expires_at NULL means permanent (admin grants only). Revoking fills revoked_at.
+    """
+
+    __tablename__ = "memberships"
+
+    student_id = Column(
+        UUID(as_uuid=True), ForeignKey("profiles.id", ondelete="CASCADE"), primary_key=True
+    )
+    tier = Column(String, primary_key=True)
+    expires_at = Column(DateTime(timezone=True), nullable=True)
+    granted_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     source = Column(String, nullable=False)
     granted_by = Column(
         UUID(as_uuid=True), ForeignKey("profiles.id", ondelete="SET NULL"), nullable=True

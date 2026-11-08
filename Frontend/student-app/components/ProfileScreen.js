@@ -3,7 +3,9 @@ import { Pressable, StyleSheet, Switch, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import Svg, { Defs, LinearGradient, Path, Stop } from "react-native-svg";
 
+import { isProActive, proLine } from "../services/access";
 import { feedback, useFeedbackSettings } from "../services/feedback";
+import { ProBadge } from "./ProScreen";
 import { space, tokens } from "../theme";
 import BottomNavBar from "./BottomNavBar";
 import AppText from "./ui/AppText";
@@ -12,7 +14,8 @@ import Button from "./ui/Button";
 import Screen from "./ui/Screen";
 
 // Profile: who you are, your numbers, and your settings.
-export default function ProfileScreen({ user, onLogout, onRequests, onHome, onCourses, onRanking, onProfile }) {
+export default function ProfileScreen({ user, pro, onLogout, onRequests, onPro, onHome, onCourses, onRanking, onProfile }) {
+  const proStatus = pro ?? user.pro;
   const { sound, haptics } = useFeedbackSettings();
   const xp = Number(user.xp) || 0;
   const streak = Math.max(Number(user.streak) || 0, 0);
@@ -26,10 +29,15 @@ export default function ProfileScreen({ user, onLogout, onRequests, onHome, onCo
           <AppText variant="display" style={styles.name} numberOfLines={2}>
             {user.name}
           </AppText>
-          {user.email ? (
+          {user.username || user.email ? (
             <AppText tone="secondary" numberOfLines={1}>
-              {user.email}
+              {user.username ? `@${user.username}` : user.email}
             </AppText>
+          ) : null}
+          {isProActive(proStatus) ? (
+            <View style={styles.proBadge}>
+              <ProBadge />
+            </View>
           ) : null}
         </View>
 
@@ -38,6 +46,22 @@ export default function ProfileScreen({ user, onLogout, onRequests, onHome, onCo
           <Stat value={xp} label="Total XP" icon={<Ionicons name="star" size={18} color={tokens.accent} />} />
           <Stat value={weekly} label="This week" icon={<Ionicons name="trending-up" size={18} color={tokens.accent} />} />
         </View>
+
+        {onPro ? (
+          <Pressable
+            onPress={onPro}
+            accessibilityRole="button"
+            accessibilityLabel={`EA Pro. ${proLine(proStatus)}`}
+            style={({ pressed }) => [styles.linkRow, pressed && styles.linkPressed]}
+          >
+            <Ionicons name="sparkles-outline" size={20} color={tokens.accentText} />
+            <View style={styles.linkLabel}>
+              <AppText variant="bodyStrong">EA Pro</AppText>
+              <AppText variant="caption" tone="secondary">{proLine(proStatus)}</AppText>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color={tokens.textTertiary} />
+          </Pressable>
+        ) : null}
 
         <Pressable
           onPress={onRequests}
@@ -190,6 +214,10 @@ const styles = StyleSheet.create({
 
   identity: {
     alignItems: "center",
+  },
+
+  proBadge: {
+    marginTop: space.sm,
   },
 
   avatar: {
