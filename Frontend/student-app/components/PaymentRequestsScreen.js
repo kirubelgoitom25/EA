@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { ActivityIndicator, RefreshControl, StyleSheet, View } from "react-native";
+import { RefreshControl, StyleSheet, View } from "react-native";
 
 import { REQUEST_STATUS, dateText, durationText, money } from "../services/access";
 import { fetchMyPaymentRequests } from "../services/api";
@@ -9,6 +9,7 @@ import Button from "./ui/Button";
 import EmptyState from "./ui/EmptyState";
 import Header from "./ui/Header";
 import Screen from "./ui/Screen";
+import { QUIET_REFRESH, RowsSkeleton } from "./ui/Skeleton";
 
 const TONES = {
   pending: { background: tokens.mist, color: tokens.textSecondary },
@@ -42,10 +43,10 @@ export default function PaymentRequestsScreen({ backLabel, onBack, onSubmitAgain
   };
 
   return (
-    <Screen refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={tokens.accent} />}>
+    <Screen pulsing={refreshing} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} {...QUIET_REFRESH} />}>
       <Header title="Payment requests" backLabel={backLabel} onBack={onBack} />
       {error ? <AppText tone="secondary" style={styles.message}>{error}</AppText> : null}
-      {!requests && !error ? <ActivityIndicator color={tokens.accent} style={styles.message} /> : null}
+      {!requests && !error ? <RowsSkeleton count={3} /> : null}
       {requests?.length === 0 ? (
         <EmptyState title="No requests yet" message="When you pay for a course, you can follow it here." />
       ) : null}

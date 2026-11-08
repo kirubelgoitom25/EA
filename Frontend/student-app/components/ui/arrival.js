@@ -28,12 +28,14 @@ function riseStyle(clock, at) {
 
 function buildLooks(clock, plan) {
   const { duration, lift } = ARRIVAL.header;
+  const { from, to, px } = ARRIVAL.tabs;
+  const tabs = { transform: [{ translateY: clock.interpolate({ inputRange: [from, to], outputRange: [px, 0], extrapolate: "clamp" }) }] };
   const header = {
     opacity: fade(clock, 0, duration),
     transform: [{ translateY: clock.interpolate({ inputRange: [0, duration], outputRange: [-lift, 0], extrapolate: "clamp" }) }],
   };
   if (!plan) {
-    return { header, rise: () => HIDDEN, label: () => HIDDEN, words: () => HIDDEN, fox: HIDDEN, lineClip: HIDDEN, lineHold: null };
+    return { header, tabs, rise: () => HIDDEN, label: () => HIDDEN, words: () => HIDDEN, fox: HIDDEN, lineClip: HIDDEN, lineHold: null };
   }
 
   const each = (build) => Object.fromEntries(Object.entries(plan.at).map(([i, at]) => [i, build(at)]));
@@ -51,6 +53,7 @@ function buildLooks(clock, plan) {
 
   return {
     header,
+    tabs,
     rise: (i) => rise[i],
     label: opacityOf(label),
     words: opacityOf(words),

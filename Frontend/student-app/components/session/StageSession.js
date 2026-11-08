@@ -1,6 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -20,12 +19,13 @@ import {
   submitChapter,
 } from "../../services/chapterProgress";
 import { feedback, haptic } from "../../services/feedback";
-import { layout, space, tailAt, tokens } from "../../theme";
+import { layout, level, space, tokens } from "../../theme";
 import AppText from "../ui/AppText";
 import Button from "../ui/Button";
 import Fox from "../ui/Fox";
 import { useFoxReact } from "../ui/FoxContext";
 import EmptyState from "../ui/EmptyState";
+import { Pulse, QuestionSkeleton } from "../ui/Skeleton";
 import FeedbackNote from "./FeedbackNote";
 import QuestionView from "./QuestionView";
 import ResultsView from "./ResultsView";
@@ -241,18 +241,27 @@ export default function StageSession({
     );
   }
 
+  // Loading: the question's own layout in soft grey shapes, where the real one will appear.
+  if (phase === "loading") {
+    return (
+      <View style={[styles.screen, { paddingTop: insets.top }]}>
+        <TopBar onExit={onExit} />
+        <View style={styles.content}>
+          <QuestionSkeleton />
+        </View>
+      </View>
+    );
+  }
+
   if (phase !== "question") {
     return (
       <View style={[styles.screen, { paddingTop: insets.top }]}>
         <TopBar onExit={onExit} />
         <View style={styles.centerFill}>
-          {phase === "loading" || phase === "submitting" ? (
-            <View style={styles.loading}>
-              <ActivityIndicator size="large" color={tokens.accent} />
-              <AppText tone="secondary" style={styles.loadingText}>
-                {phase === "submitting" ? "Saving your chapter…" : "Loading questions…"}
-              </AppText>
-            </View>
+          {phase === "submitting" ? (
+            <Pulse style={styles.loading} label="Saving your chapter">
+              <AppText tone="secondary">Saving your chapter…</AppText>
+            </Pulse>
           ) : null}
 
           {phase === "empty" ? (
@@ -331,7 +340,7 @@ export default function StageSession({
         ) : isFill ? (
           <Button label="Check" onPress={checkText} disabled={!draft.trim()} />
         ) : (
-          <AppText variant="label" tone="tertiary" style={styles.hint}>
+          <AppText variant="label" tone="secondary" style={styles.hint}>
             Tap an answer
           </AppText>
         )}
@@ -372,10 +381,10 @@ function TopBar({ onExit, total, current, answered }) {
                 {
                   backgroundColor:
                     i < done
-                      ? tailAt(total <= 1 ? 0 : i / (total - 1))
+                      ? level.segmentDone
                       : i === current
-                        ? tokens.accentTint
-                        : tokens.divider,
+                        ? level.segmentNow
+                        : level.segmentAhead,
                 },
               ]}
             />
@@ -391,7 +400,7 @@ function TopBar({ onExit, total, current, answered }) {
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
-    backgroundColor: tokens.bg,
+    backgroundColor: level.lessonBg,
   },
 
   flex: {
@@ -432,7 +441,7 @@ const styles = StyleSheet.create({
   footer: {
     paddingHorizontal: layout.gutter,
     paddingTop: space.md,
-    backgroundColor: tokens.bg,
+    backgroundColor: level.lessonBg,
   },
 
   centerFill: {
@@ -445,9 +454,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
 
-  loadingText: {
-    marginTop: space.lg,
-  },
 
   pressed: {
     opacity: 0.6,

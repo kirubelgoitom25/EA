@@ -1,7 +1,7 @@
 import React from "react";
 import { StyleSheet, View } from "react-native";
 
-import { space, tokens, type } from "../../theme";
+import { level, space, tokens, type } from "../../theme";
 import AppText from "../ui/AppText";
 import Button from "../ui/Button";
 import Fox from "../ui/Fox";
@@ -26,6 +26,7 @@ export default function ResultsView({
 
   return (
     <Screen
+      background={level.lessonBg}
       footer={
         <View>
           <Button label={hasNext ? "Next chapter" : backLabel} onPress={hasNext ? onNext : onBackToCourse} />

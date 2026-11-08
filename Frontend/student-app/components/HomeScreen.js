@@ -12,6 +12,7 @@ import EmptyState from "./ui/EmptyState";
 import { useFoxReact } from "./ui/FoxContext";
 import Screen, { TAB_BAR_HEIGHT } from "./ui/Screen";
 import Route from "./ui/Route";
+import { PathSkeleton } from "./ui/Skeleton";
 
 // How many chapters of the trail Home shows around where you are.
 const WINDOW = 5;
@@ -24,6 +25,7 @@ export default function HomeScreen({
   user,
   courses = [],
   availableCount = 0,
+  loading = false, // "Your courses" is still being read from the phone
   onCourses,
   onExplore,
   onRanking,
@@ -163,6 +165,8 @@ export default function HomeScreen({
             }
             onPress={(i) => onContinueChapter(trailCourse, visible[i])}
           />
+        ) : loading ? (
+          <PathSkeleton count={5} words={false} style={styles.trail} />
         ) : courses.length === 0 && availableCount > 0 ? (
           <EmptyState
             pose="waving"

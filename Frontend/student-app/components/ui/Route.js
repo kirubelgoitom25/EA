@@ -12,9 +12,10 @@ import FoxPeek, { CSS_EASE, PEEK } from "./FoxPeek";
 import { TITLE_FOX, placeEdgeFox, placeTitleFox, scaleOf } from "./foxPlacement";
 import { useReducedMotion } from "./motion";
 import { layoutPath, pathD, pathLength, pathPoints, pointAt, travelled, wordsSide } from "./pathModel";
-import { ARRIVAL, burstDelay, newlyDone } from "./pathMotionModel";
+import { ADVANCE, ARRIVAL, SCREEN, advanceOf, burstDelay, newlyDone } from "./pathMotionModel";
 import Rock, { Dome, ROCKS, ringTop, rockBox } from "./Rock";
 import Sparkle from "./Sparkle";
+import StepMorph, { win } from "./StepMorph";
 
 const AnimatedPath = Animated.createAnimatedComponent(Path);
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
@@ -54,6 +55,16 @@ const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 //       line to the current step every 7 s
 //   The rows keep the room they had for the head, so nothing on the path moves.
 // - arrival: what useArrival gave the screen, to have the path appear step by step (arrival.js)
+// - advance: shown again after progress (a step done since it was last shown, on any path), the path
+//   plays it once (pathMotionModel's ADVANCE): the finished step turns into a check and its ring shrinks
+//   away, the line fills on, the next step unlocks with a small pop and gets its ring, and the fox ducks
+//   behind the step she leaves and peeks up behind the new one. Taps work throughout.
+//   advanceLead: how long it waits first (ms; the course page fading back in waits longer)
+// - exit: { clock, index }: the course page leaving for chapter `index` (pathMotionModel's SCREEN.exit):
+//   that step's tile is hidden (the screen flies its own copy), the others fade away, done ones up and
+//   the rest down, and the line, the words and the fox go
+// - entry: { clock, target }: the chapter page arriving from that tile (SCREEN.enter): step `target`
+//   is already there; the others rise in, the line draws on, the den pops up and the fox peeks up
 // The geometry lives in pathModel.js; where the fox may stand, in foxPlacement.js.
 
 const ICONS = { video: "play", reading: "document-text", questions: "help" };
@@ -77,11 +88,28 @@ const lastStop = {};
 
 // scrollY / viewHeight (optional): where the screen is, in the route's own coordinates, so only the
 // part of the drifting line near the screen moves (see DriftingLine).
-export default function Route({ items, den, onPress, cta = true, foxKey, fox = true, words = true, foxPlace = "above", zigzag = true, mascot = null, arrival = null, scrollY = null, viewHeight = null, style }) {
+export default function Route({ items, den, onPress, cta = true, foxKey, fox = true, words = true, foxPlace = "above", zigzag = true, mascot = null, arrival = null, scrollY = null, viewHeight = null, exit = null, entry = null, advanceLead = null, style }) {
   const reduce = useReducedMotion();
   const { width: screenWidth } = useWindowDimensions();
   const [measured, setMeasured] = useState(null);
   const [callout, setCallout] = useState(null); // { kind: "step" | "dome" | "den", index }
+  // What moved on since this path was last shown plays once, as an advance (what advanceOf found, with
+  // its clock in ms). Worked out while rendering, so the very first frame already shows where it starts;
+  // not while the page's own arrival plays, and never with reduce motion (then it is simply shown).
+  const [, redraw] = useState(0);
+  const advanceRef = useRef(null);
+  const advanceSeen = useRef(null);
+  const advanceReady = !arrival || !!arrival.plan;
+  const advanceKey = `${items.map((item) => `${item.id}:${item.status}`).join()}|${!!den?.reached}|${advanceReady}`;
+  if (advanceSeen.current !== advanceKey) {
+    advanceSeen.current = advanceKey;
+    if (advanceReady) {
+      const found = advanceOf(items, den ? foxKey ?? "path" : null, !!den?.reached);
+      if (found && !reduce && !arrival && !entry) advanceRef.current = { ...found, clock: new Animated.Value(0) };
+    }
+  }
+  const advance = advanceRef.current;
+  const lead = advanceLead ?? ADVANCE.lead;
   const width = measured ?? screenWidth - layout.gutter * 2;
   const above = fox && foxPlace === "above";
   const k = scaleOf(screenWidth);
@@ -94,7 +122,8 @@ export default function Route({ items, den, onPress, cta = true, foxKey, fox = t
   const { layout: rows, points } = pathPoints(items, !!den, width, cta, above, zigzag ? { frame: screenWidth } : null);
   const curve = zigzag ? "s" : "spline";
   const dash = zigzag ? DASHED : DOTTED;
-  const last = travelled(items, den);
+  const reached = travelled(items, den);
+  const last = advance ? Math.min(advance.lastFrom, reached) : reached;
 
   const nextAt = items.findIndex((item) => item.status === "next");
   // The fox stands at the step you are at, or at the den once nothing is left.
@@ -174,19 +203,99 @@ export default function Route({ items, den, onPress, cta = true, foxKey, fox = t
   // A step just completed bursts, as its check appears: at once, or once it has arrived on the page.
   // A layout effect, so the first frame with the check already has its particles.
   const [bursts, setBursts] = useState([]);
+  const pendingBursts = useRef([]);
   const arrivalReady = !arrival || !!arrival.plan;
   const statuses = items.map((item) => `${item.id}:${item.status}`).join();
   useLayoutEffect(() => {
     if (!arrivalReady) return;
     const fresh = newlyDone(items).map((index) => ({ id: items[index].id, index, delay: burstDelay(arrival?.plan, index, Date.now()) }));
-    if (fresh.length && !reduce) setBursts((now) => [...now, ...fresh]);
+    if (!fresh.length || reduce) return;
+    // during an advance the burst waits for its clock to start, then for the check to appear
+    if (advanceRef.current) pendingBursts.current = [...pendingBursts.current, ...fresh.map((burst) => ({ ...burst, delay: lead + ADVANCE.checkIn[0] }))];
+    else setBursts((now) => [...now, ...fresh]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [statuses, arrivalReady]);
 
+  useEffect(() => {
+    if (!advance) return undefined;
+    return playClock(
+      advance.clock,
+      () => {
+        if (advanceRef.current !== advance) return;
+        advanceRef.current = null;
+        redraw((n) => n + 1);
+      },
+      () => {
+        const ready = pendingBursts.current;
+        pendingBursts.current = [];
+        if (ready.length) setBursts((now) => [...now, ...ready]);
+      },
+      lead,
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [advance]);
+
+  // the chapter page's line draws on from the top as it arrives
+  const entryLine = useMemo(() => {
+    if (!entry) return null;
+    const open = Animated.add(win(entry.clock, SCREEN.enter.line, 0, 1), -1);
+    return {
+      clip: { overflow: "hidden", transform: [{ translateY: Animated.multiply(open, rows.total) }] },
+      hold: { transform: [{ translateY: Animated.multiply(open, -rows.total) }] },
+    };
+  }, [entry, rows.total]);
+
+  // Every exit / entry style is built once per move and reused: one built again mid-move would be drawn
+  // from the clock's JS value, which the native driver does not update.
+  const scenes = useMemo(() => {
+    const cache = new Map();
+    return (at) => {
+      if (!cache.has(at)) cache.set(at, sceneStyle(exit, entry, at));
+      return cache.get(at);
+    };
+  }, [exit, entry]);
+  const wordsScenes = useMemo(() => {
+    const cache = new Map();
+    return (at) => {
+      if (!cache.has(at)) {
+        cache.set(
+          at,
+          exit && exit.index === at
+            ? { opacity: win(exit.clock, SCREEN.exit.words, 1, 0) }
+            : entry && entry.target === at
+              ? { opacity: win(entry.clock, SCREEN.enter.others, 0, 1) }
+              : null,
+        );
+      }
+      return cache.get(at);
+    };
+  }, [exit, entry]);
+  const exitLooks = useMemo(
+    () =>
+      exit
+        ? {
+            line: { opacity: win(exit.clock, SCREEN.exit.line, 1, 0) },
+            fox: { opacity: win(exit.clock, SCREEN.exit.fox, 1, 0), transform: [{ translateX: win(exit.clock, SCREEN.exit.fox, 0, SCREEN.exit.foxPx) }] },
+          }
+        : null,
+    [exit],
+  );
+  const denLook = useMemo(() => denScene(exit, entry, n), [exit, entry, n]);
+  const denLit = useMemo(
+    () =>
+      advance?.denLit
+        ? {
+            pop: { transform: [{ scale: advance.clock.interpolate({ inputRange: [ADVANCE.unlock[0], ADVANCE.pop[0], ADVANCE.popPeak, ADVANCE.pop[1]], outputRange: [1, 1, 1.08, 1], extrapolate: "clamp" }) }] },
+            light: { opacity: win(advance.clock, ADVANCE.unlock, 0, 1) },
+          }
+        : null,
+    [advance],
+  );
+
   return (
     <View style={[{ height: rows.total }, style]} onLayout={(event) => setMeasured(Math.round(event.nativeEvent.layout.width))}>
-      <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, looks?.lineClip]}>
-      <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, looks?.lineHold]}>
+      <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, looks?.lineClip, entryLine?.clip, exitLooks?.line]}>
+      <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, looks?.lineHold, entryLine?.hold]}>
       {/* the dotted path: stone grey all the way, with the moss-green dots over the part you have done */}
       {points.length > 1 && lineMotion === "title" ? (
         // the dots drift forward along the whole line, one gap every 2.8 s: stone grey all the way,
@@ -244,6 +353,9 @@ export default function Route({ items, den, onPress, cta = true, foxKey, fox = t
           </Svg>
         </Animated.View>
       ) : null}
+      {advance && advance.lastTo > advance.lastFrom ? (
+        <LineFill points={points} from={advance.lastFrom} to={advance.lastTo} curve={curve} dash={dash} dashed={dashed} width={width} height={rows.total} clock={advance.clock} />
+      ) : null}
       </Animated.View>
       </Animated.View>
 
@@ -265,14 +377,16 @@ export default function Route({ items, den, onPress, cta = true, foxKey, fox = t
             style={[styles.pinned, { left: at.x - 28, top: at.y - 23 }]}
           >
             <Animated.View style={looks?.rise(i)}>
-              <Dome size={56} lit={items[i - 1].status === "done"} />
+              <Animated.View style={scenes(i - 0.5)}>
+                <Dome size={56} lit={items[i - 1].status === "done"} />
+              </Animated.View>
             </Animated.View>
           </Pressable>
           <AnimatedPressable
             onPress={() => toggle({ kind: "dome", index: i })}
             accessible={false}
             importantForAccessibility="no"
-            style={[styles.partName, { top: at.y - 12 }, toTheRight ? { left: at.x + 38, right: 0 } : { left: 0, right: width - at.x + 38, alignItems: "flex-end" }, looks?.label(i)]}
+            style={[styles.partName, { top: at.y - 12 }, toTheRight ? { left: at.x + 38, right: 0 } : { left: 0, right: width - at.x + 38, alignItems: "flex-end" }, looks?.label(i), scenes(i - 0.5)]}
           >
             <MeasuredText
               variant="label"
@@ -291,14 +405,21 @@ export default function Route({ items, den, onPress, cta = true, foxKey, fox = t
 
       {/* her head goes under the steps, so the ring and the key sit in front of her */}
       {above && !mascot && foxAt >= 0 ? (
-        <PeekMarker foxKey={foxKey} index={foxAt} count={n} points={points} curve={curve} width={width} reduce={reduce} />
+        <PeekMarker foxKey={foxKey} index={foxAt} count={n} points={points} curve={curve} width={width} reduce={reduce} advance={advance} entry={entry} />
       ) : null}
 
       {/* the course fox, under the steps and their words; the screen's edges clip her */}
       {seen ? (
         <View pointerEvents="none" style={[styles.clip, { left: -off, width: screenWidth, height: rows.total }]}>
-          <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, looks?.fox]}>
-            <GlideTo spot={spot} offset={off} reduce={reduce}>
+          <Animated.View
+            pointerEvents="none"
+            style={[
+              StyleSheet.absoluteFill,
+              looks?.fox,
+              exitLooks?.fox,
+            ]}
+          >
+            <GlideTo spot={spot} offset={off} reduce={reduce} delay={advance ? lead + ADVANCE.line[0] : 300}>
               {mascot === "title" ? (
                 <FoxFigure spec={TITLE_FOX} k={k} motion="breathe" reduce={reduce} />
               ) : spot ? (
@@ -324,6 +445,10 @@ export default function Route({ items, den, onPress, cta = true, foxKey, fox = t
           onNote={() => toggle({ kind: "step", index: i })}
           report={report}
           looks={looks}
+          advance={advance}
+          scene={scenes(i)}
+          wordsScene={wordsScenes(i)}
+          entry={entry}
         />
       ))}
 
@@ -336,7 +461,18 @@ export default function Route({ items, den, onPress, cta = true, foxKey, fox = t
           style={[styles.pinned, { left: points[n].x - 46, top: points[n].y - 38 }]}
         >
           <Animated.View style={looks?.rise(n)}>
-            <Dome size={92} lit={!!den.reached} />
+          <Animated.View style={denLook}>
+            {denLit ? (
+              <Animated.View style={denLit.pop}>
+                <Dome size={92} lit={false} />
+                <Animated.View style={[StyleSheet.absoluteFill, denLit.light]}>
+                  <Dome size={92} lit />
+                </Animated.View>
+              </Animated.View>
+            ) : (
+              <Dome size={92} lit={!!den.reached} />
+            )}
+          </Animated.View>
           </Animated.View>
         </Pressable>
       ) : null}
@@ -365,13 +501,32 @@ export default function Route({ items, den, onPress, cta = true, foxKey, fox = t
 // One step: its rock, and, if it is the one you are at, its bubble and its words.
 // report(key, rect): when the course fox needs to know, where this step's words are (in the path's
 // coordinates): its tag, or, for the current step, its kicker, its title's lines and its button.
-function Step({ item, index, width, x, center, cta, words, zigzag, onPress, onNote, report, looks }) {
+function Step({ item, index, width, x, center, cta, words, zigzag, onPress, onNote, report, looks, advance, scene, wordsScene, entry }) {
   const next = item.status === "next";
   const done = item.status === "done";
   const size = ROCK[item.status] ?? ROCK.todo;
   const box = rockBox(size);
   const side = x < width / 2 ? "right" : "left"; // the words go on the side with more room
-  const icon = ICONS[item.type] ?? (done ? "checkmark" : next ? "play" : "star");
+  const icon = iconOf(item.type, item.status);
+  // this step's part in an advance: it was just done, or just unlocked; and the step that was current
+  // keeps its words a moment, fading
+  const role = advance ? (advance.done.includes(index) ? "done" : advance.unlock.includes(index) ? "unlock" : null) : null;
+  const was = role ? advance.before[index] : null;
+  const leaving = advance && advance.leaving === index ? advance.clock : null;
+  const clock = advance?.clock;
+  // built once per advance (see the path's own note on this)
+  const advanceLooks = useMemo(
+    () => ({
+      tag: role === "done" ? { opacity: win(clock, ADVANCE.labelIn, 0, 1) } : role === "unlock" ? { opacity: win(clock, ADVANCE.unlock, 1, 0) } : null,
+      words: leaving
+        ? { opacity: win(leaving, ADVANCE.wordsOut, 1, 0) }
+        : role === "unlock"
+          ? { opacity: win(clock, ADVANCE.wordsIn, 0, 1), transform: [{ translateY: win(clock, ADVANCE.wordsIn, 6, 0) }] }
+          : null,
+    }),
+    [role, clock, leaving],
+  );
+
   const press = () => onPress?.(index);
   const reach = size * 0.55 + 28;
   const tag = item.tag ?? NAMES[item.type];
@@ -393,17 +548,30 @@ function Step({ item, index, width, x, center, cta, words, zigzag, onPress, onNo
       >
         {({ pressed }) => (
           <Animated.View style={looks?.rise(index)}>
-            <Rock status={item.status} size={size} icon={icon} ring={next} pressed={pressed} wait={looks ? ARRIVAL.routineWait : undefined} />
+          <Animated.View style={scene}>
+            {role ? (
+              <StepMorph role={role} from={was} to={item.status} iconFrom={iconOf(item.type, was)} iconTo={icon} size={size} clock={clock} />
+            ) : (
+              <Rock status={item.status} size={size} icon={icon} ring={next} pressed={pressed} wait={looks ? ARRIVAL.routineWait : entry ? SCREEN.enter.end + 1200 : undefined} />
+            )}
+          </Animated.View>
           </Animated.View>
         )}
       </Pressable>
 
-      {words && !next && tag ? (
+      {words && (!next || role === "unlock") && tag ? (
         <AnimatedPressable
           onPress={onNote}
           accessible={false}
           importantForAccessibility="no"
-          style={[styles.tag, { top: center - 11 }, side === "right" ? { left: x + reach - 4, right: 0 } : { left: 0, right: width - x + reach - 4, alignItems: "flex-end" }, looks?.label(index)]}
+          style={[
+            styles.tag,
+            { top: center - 11 },
+            side === "right" ? { left: x + reach - 4, right: 0 } : { left: 0, right: width - x + reach - 4, alignItems: "flex-end" },
+            looks?.label(index),
+            advanceLooks.tag,
+            scene,
+          ]}
         >
           <MeasuredText
             variant="label"
@@ -420,8 +588,16 @@ function Step({ item, index, width, x, center, cta, words, zigzag, onPress, onNo
 
       {next && cta && !zigzag ? <Bubble label={item.action ?? "Continue"} x={x} top={center - size * 0.5 - 62} onPress={press} /> : null}
 
-      {next && (words || (cta && zigzag)) ? (
-        <Animated.View pointerEvents="box-none" style={[StyleSheet.absoluteFill, looks?.words(index)]}>
+      {(next || leaving) && (words || (cta && zigzag)) ? (
+        <Animated.View
+          pointerEvents={leaving ? "none" : "box-none"}
+          style={[
+            StyleSheet.absoluteFill,
+            looks?.words(index),
+            advanceLooks.words,
+            wordsScene,
+          ]}
+        >
         <Entrance
           delay={Math.min(index, 6) * 70}
           distance={12}
@@ -485,6 +661,86 @@ function Step({ item, index, width, x, center, cta, words, zigzag, onPress, onNo
         </Animated.View>
       ) : null}
     </>
+  );
+}
+
+// How a step (or a dome at i - 0.5, or the den at n) moves while the course page leaves for a chapter
+// (exit) or a chapter page arrives (entry); null otherwise.
+function sceneStyle(exit, entry, at) {
+  if (exit) {
+    // the screen flies its own copy of this tile from the first moment of the exit
+    if (at === exit.index) return { opacity: exit.clock.interpolate({ inputRange: [0, 1], outputRange: [1, 0], extrapolate: "clamp" }) };
+    const w = SCREEN.exit.others;
+    const by = (at < exit.index ? -1 : 1) * SCREEN.exit.shiftPx;
+    return { opacity: win(exit.clock, w, 1, 0), transform: [{ translateY: win(exit.clock, w, 0, by) }] };
+  }
+  if (entry && at !== entry.target) {
+    const w = SCREEN.enter.others;
+    return { opacity: win(entry.clock, w, 0, 1), transform: [{ translateY: win(entry.clock, w, SCREEN.enter.othersPx, 0) }] };
+  }
+  return null;
+}
+
+// The den leaves with the steps below; on an arriving chapter page it pops up last.
+function denScene(exit, entry, n) {
+  if (exit) return sceneStyle(exit, null, n);
+  if (!entry) return null;
+  const [a, b] = SCREEN.enter.den;
+  const peak = a + (b - a) * 0.6;
+  return {
+    opacity: win(entry.clock, [a, peak], 0, 1),
+    transform: [{ scale: entry.clock.interpolate({ inputRange: [a, peak, b], outputRange: [0.6, 1.08, 1], extrapolate: "clamp" }) }],
+  };
+}
+
+// Plays an advance's clock (ms) once the path's first frame is on screen (a heavy first draw would
+// otherwise eat into it), after a short hold on the old state. Returns its cleanup.
+// onStart: the clock is at 0 and about to run (the hold is part of the clock's own lead).
+function playClock(clock, onEnd, onStart, lead = ADVANCE.lead) {
+  let run = null;
+  const frame = requestAnimationFrame(() => {
+    onStart?.();
+    run = Animated.sequence([
+      Animated.delay(lead),
+      Animated.timing(clock, { toValue: ADVANCE.end, duration: ADVANCE.end, easing: Easing.linear, useNativeDriver: true }),
+    ]);
+    run.start(({ finished }) => finished && onEnd());
+  });
+  return () => {
+    cancelAnimationFrame(frame);
+    run?.stop();
+  };
+}
+
+// A step's icon: its type's (video, reading, questions) while ahead or current, a check once done (as in
+// the "next lesson" reference); a chapter shows play while current and a star while ahead.
+function iconOf(type, status) {
+  if (status === "done") return "checkmark";
+  return ICONS[type] ?? (status === "next" ? "play" : "star");
+}
+
+// The piece of line an advance fills, from the step that was current to the new one: the travelled
+// colour, drawn on from the top over ADVANCE.line. A clip box slides down while the line inside slides
+// up by as much, so it stays put and the whole thing runs on the native driver.
+function LineFill({ points, from, to, curve, dash, dashed, width, height, clock }) {
+  const along = Array.from({ length: 17 }, (_, i) => pointAt(points, from + ((to - from) * i) / 16, curve));
+  const top = Math.min(...along.map((pt) => pt.y)) - DOT;
+  const span = Math.max(...along.map((pt) => pt.y)) + DOT - top;
+  // built once per fill (see the path's own note on this)
+  const slide = useMemo(() => {
+    const open = Animated.add(win(clock, ADVANCE.line, 0, 1), -1);
+    return { clip: { transform: [{ translateY: Animated.multiply(open, span) }] }, hold: { transform: [{ translateY: Animated.multiply(open, -span) }] } };
+  }, [clock, span]);
+  return (
+    <Animated.View pointerEvents="none" style={[{ position: "absolute", left: 0, top, width, height: span, overflow: "hidden" }, slide.clip]}>
+      <Animated.View style={slide.hold}>
+        <Svg width={width} height={height} style={{ position: "absolute", top: -top }}>
+          {/* a band of the ground under it hides the grey dots there (they may drift out of step) */}
+          <Path d={pathD(points, from, to, curve)} stroke={stone.bg} strokeWidth={DOT + 3} strokeLinecap="round" fill="none" />
+          <Path d={pathD(points, from, to, curve)} stroke={stone.moss} strokeDashoffset={dashPhase(points, from, curve, dash)} {...dashed} />
+        </Svg>
+      </Animated.View>
+    </Animated.View>
   );
 }
 
@@ -589,31 +845,79 @@ function useLeg(foxKey, index, reduce, timing) {
 const STEPS = 24; // how finely a walk follows the curve
 const ALONG = Array.from({ length: STEPS + 1 }, (_, i) => i / STEPS);
 
-// The fox's head over the step you are at (Home), tucked in behind its ring; over the den's dome
-// once the course is done. When you reach a new step she glides along the line to it, no hop, and
-// is there before the step's own routine starts.
-function PeekMarker({ foxKey, index, count, points, curve, width, reduce }) {
-  const { leg, p } = useLeg(foxKey, index, reduce, () => ({ delay: 300, duration: 700 }));
+// The fox's head over the step you are at, tucked in behind its ring; over the den's dome once the
+// course is done. When you reach a new step she never jumps or glides: she ducks down behind the step
+// she leaves and, a moment later, peeks up behind the new one (pathMotionModel's ADVANCE), in step with
+// the path's own advance. With reduce motion she is simply there.
+// advance: the path's own advance, if one plays: she leaves the step that was current then, on its clock.
+function PeekMarker({ foxKey, index, count, points, curve, width, reduce, advance, entry }) {
+  const [, redraw] = useState(0);
+  const moveRef = useRef(null); // { from, clock } while she changes place
+  const placed = useRef(null); // where she was last drawn
+  if (placed.current === null) placed.current = foxKey && lastStop[foxKey] !== undefined ? lastStop[foxKey] : index;
+  const cameFrom = advance && advance.leaving >= 0 ? advance.leaving : null;
+  const from = cameFrom ?? placed.current;
+  if (from !== index && !moveRef.current) {
+    moveRef.current = reduce || from < 0 || from >= points.length ? null : { from, clock: advance?.clock ?? new Animated.Value(0), own: !advance };
+  }
+  placed.current = index;
+  if (foxKey) lastStop[foxKey] = index;
+  const move = moveRef.current;
+
+  useEffect(() => {
+    if (!move || !move.own) return undefined;
+    return playClock(move.clock, () => {
+      moveRef.current = null;
+      redraw((n) => n + 1);
+    });
+  }, [move]);
+  // on the path's clock, she is done when the advance is
+  useEffect(() => {
+    if (move && !move.own && !advance) {
+      moveRef.current = null;
+      redraw((n) => n + 1);
+    }
+  }, [move, advance]);
+
+  // built once per move (see the path's own note on this)
+  const peekIn = useMemo(
+    () => (entry ? { style: { opacity: win(entry.clock, SCREEN.enter.fox, 0, 1), transform: [{ translateY: win(entry.clock, SCREEN.enter.fox, ADVANCE.duckPx, 0) }] } } : null),
+    [entry],
+  );
+  const moveLooks = useMemo(
+    () =>
+      move
+        ? {
+            leaving: { leaving: true, style: { opacity: win(move.clock, ADVANCE.foxDuck, 1, 0), transform: [{ translateY: win(move.clock, ADVANCE.foxDuck, 0, ADVANCE.duckPx) }] } },
+            here: { style: { opacity: win(move.clock, ADVANCE.foxPeek, 0, 1), transform: [{ translateY: win(move.clock, ADVANCE.foxPeek, ADVANCE.duckPx, 0) }] } },
+          }
+        : null,
+    [move],
+  );
+
   // from a stop's point to the top-left of her head
   const dy = (k) => (k < count ? ringTop(ROCK.next) : -DEN_TOP) + PEEK.tuck - PEEK.height;
-  const along = ALONG.map((t) => pointAt(points, leg.from + (leg.to - leg.from) * t, curve));
-  const x = along.map((pt) => pt.x - PEEK.width / 2);
-  const y = ALONG.map((t, i) => along[i].y + dy(leg.from) + (dy(leg.to) - dy(leg.from)) * t);
-  const still = leg.from === leg.to;
-  const side = points[Math.min(index, points.length - 1)].x < width / 2 ? "left" : "right";
+  const head = (k, motion, key) => {
+    const at = points[Math.min(k, points.length - 1)];
+    return (
+      <Animated.View
+        key={key}
+        pointerEvents={motion?.leaving ? "none" : "box-none"}
+        style={[styles.peek, { transform: [{ translateX: at.x - PEEK.width / 2 }, { translateY: at.y + dy(k) }] }]}
+      >
+        <Animated.View pointerEvents="box-none" style={motion?.style}>
+          <FoxPeek side={at.x < width / 2 ? "left" : "right"} quiet={!!motion?.leaving} />
+        </Animated.View>
+      </Animated.View>
+    );
+  };
 
+  if (!move) return head(index, peekIn, "here");
   return (
-    <Animated.View
-      pointerEvents="box-none"
-      style={[
-        styles.peek,
-        still
-          ? { transform: [{ translateX: x[STEPS] }, { translateY: y[STEPS] }] }
-          : { transform: [{ translateX: p.interpolate({ inputRange: ALONG, outputRange: x }) }, { translateY: p.interpolate({ inputRange: ALONG, outputRange: y }) }] },
-      ]}
-    >
-      <FoxPeek side={side} />
-    </Animated.View>
+    <>
+      {head(move.from, moveLooks.leaving, "leaving")}
+      {head(index, moveLooks.here, "here")}
+    </>
   );
 }
 
@@ -718,7 +1022,7 @@ function MeasuredText({ onRect, originX = 0, originY = 0, ready = true, ...props
 // Puts its child at spot (a box's top-left on the path; offset: the clip box's left edge is that far
 // left of the path). The first time, once the measurements have settled, she fades in; after that,
 // a new spot (a new current step) has her glide there: no hop, and straight there with reduce motion.
-function GlideTo({ spot, offset, reduce, children }) {
+function GlideTo({ spot, offset, reduce, delay = 300, children }) {
   const x = useRef(new Animated.Value(0)).current;
   const y = useRef(new Animated.Value(0)).current;
   const shown = useRef(new Animated.Value(0)).current;
@@ -748,7 +1052,7 @@ function GlideTo({ spot, offset, reduce, children }) {
     }
     const glide = Animated.parallel(
       [x, y].map((v, i) =>
-        Animated.timing(v, { toValue: i ? target.y : target.x, delay: 300, duration: 700, easing: Easing.inOut(Easing.cubic), useNativeDriver: true }),
+        Animated.timing(v, { toValue: i ? target.y : target.x, delay, duration: 700, easing: Easing.inOut(Easing.cubic), useNativeDriver: true }),
       ),
     );
     glide.start();

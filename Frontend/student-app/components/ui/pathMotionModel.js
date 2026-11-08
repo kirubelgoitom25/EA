@@ -1,7 +1,10 @@
 // The numbers behind the path's two small "feel" touches, pure so they are easy to test:
 // - the course page's arrival (see arrival.js): one clock in ms, and when each thing plays on it
 // - the sparkle (see Sparkle.js): its six particles, and which steps have just been completed
-// Both remember things for the session (while the app runs and the same student is logged in).
+// - the advance (see Route.js / StepMorph.js): a path shown again after progress plays it once
+// All remember things for the session (while the app runs and the same student is logged in).
+
+import { travelled } from "./pathModel.js";
 
 export const ARRIVAL = {
   lead: 250, // the first chapter starts
@@ -21,6 +24,7 @@ export const ARRIVAL = {
   fox: 500,
   foxPx: 90,
   header: { duration: 300, lift: 6 },
+  tabs: { from: 300, to: 800, px: 80 }, // the tab bar slides up into place, with the header
   bar: { delay: 300, duration: 800 },
   routineWait: 3000, // the current chapter's own routine starts once all this is over
 };
@@ -116,9 +120,69 @@ export const SPARKS = [
   { shape: "star", colour: "done", dx: 9, dy: 55 },
 ];
 
+// The advance, from the "next lesson" and "back to path" references, at 80% of their pace so the whole
+// thing takes about 1.5 s. Every window is [start, end] in ms from the moment the path shows the new
+// state; each piece plays after the one before it:
+// the finished step's play turns into a check and its tile into the done colour, its ring shrinks away
+// and the fox ducks behind it, its words fade and its plain label appears; the line fills on to the
+// next step, which unlocks with a small pop and gets its ring; the fox peeks up behind it and its
+// words come in.
+export const ADVANCE = {
+  iconOut: [0, 160],
+  checkIn: [160, 400],
+  checkPeak: 320, // the check overshoots to 115% here, then settles
+  face: [80, 320],
+  ringOut: [240, 480],
+  wordsOut: [240, 400],
+  labelIn: [480, 720],
+  line: [480, 960],
+  bar: [400, 880],
+  unlock: [880, 1056],
+  pop: [1056, 1200],
+  popPeak: 1080, // 108%
+  ringIn: [960, 1240],
+  foxDuck: [240, 480],
+  foxPeek: [1120, 1520],
+  wordsIn: [1240, 1480],
+  end: 1520,
+  lead: 200, // the path holds its old state this long after its first frame is drawn, then the advance plays
+  duckPx: 60,
+  ringOutScale: 0.78,
+  ringInScale: 0.8,
+};
+
+// from -> to over the window [a, b] with a calm ease-in-out, as interpolate frames (interpolate itself is
+// linear between points, so the curve is sampled).
+export function easedFrames([a, b], from, to, steps = 8) {
+  const inputRange = [];
+  const outputRange = [];
+  for (let s = 0; s <= steps; s += 1) {
+    inputRange.push(round(a + ((b - a) * s) / steps));
+    outputRange.push(round(from + (to - from) * easeInOut(s / steps)));
+  }
+  return { inputRange, outputRange };
+}
+
+// The two moves between the course page and a chapter page, in ms, each window [start, end]; together
+// about 1.5 s (from the chapter-to-lessons and back-to-path references, a little quicker).
+// - exit (course page, after Continue): the other chapters fade away, done ones up and the rest down,
+//   the current one's words, the line and the fox go, the tab bar slides down, the title fades, and the
+//   chapter's tile travels to where its lesson will be on the chapter page (its icon turning into the
+//   lesson's on the way). Then the chapter page shows.
+// - enter (chapter page, from that tile): its panel and title come in, the other lessons rise in, the
+//   line draws on, the den pops up and the fox peeks up behind the current lesson.
+// - back (chapter page -> course page): the chapter page fades out a little smaller, the course page
+//   fades in from a little larger, and its advance waits for that (lead) before it plays.
+export const SCREEN = {
+  exit: { others: [0, 300], shiftPx: 24, words: [0, 170], line: [0, 170], fox: [0, 300], foxPx: 18, tabs: [0, 340], tabsPx: 90, title: [0, 220], tile: [80, 600], icon: [340, 520], end: 600, settle: [600, 900] },
+  enter: { panel: [0, 250], title: [0, 260], titlePx: 8, bar: { delay: 0, duration: 400 }, others: [120, 380], othersPx: 6, line: [200, 600], den: [520, 800], fox: [480, 880], end: 880 },
+  back: { out: 300, outOpacity: 0.6, outScale: 0.97, in: 400, inScale: 1.03, lead: 450 },
+};
+
 // --- what the session remembers ---
 
 const opened = new Set();
+const shownStatus = new Map(); // a step's id (or "den:<path>") -> its status as last shown on a path
 const lastSeen = new Map(); // a step's id -> done, as last shown on any path
 
 // True the first time this is asked for a key in a session.
@@ -142,8 +206,45 @@ export function newlyDone(items) {
   return fresh;
 }
 
+// What changed on a path since it (or another path with the same steps) was last shown, worth
+// playing as an advance: steps just done, steps just unlocked (to do -> current), the step that was
+// current, the den just reached, and how far the travelled line reached before and now. null when
+// nothing moved forward (a first showing, or progress reset by practising again). It also remembers
+// what is shown now, so each advance plays once. items: the path's steps ({ id, status });
+// denKey / denReached: the path's den, if it has one.
+export function advanceOf(items, denKey = null, denReached = false) {
+  const done = [];
+  const unlock = [];
+  let leaving = -1;
+  const before = items.map((item) => {
+    if (!item.id) return item;
+    const prev = shownStatus.get(item.id);
+    shownStatus.set(item.id, item.status);
+    if (prev === undefined || prev === item.status) return item;
+    if (item.status === "done") {
+      done.push(items.indexOf(item));
+      if (prev === "next") leaving = items.indexOf(item);
+    } else if (item.status === "next" && prev === "todo") {
+      unlock.push(items.indexOf(item));
+    }
+    return { ...item, status: prev };
+  });
+  let denLit = false;
+  if (denKey) {
+    const id = `den:${denKey}`;
+    const prev = shownStatus.get(id);
+    shownStatus.set(id, !!denReached);
+    denLit = prev === false && !!denReached;
+  }
+  if (!done.length && !denLit) return null;
+  const lastFrom = Math.max(0, travelled(before, denKey ? { reached: !denLit && !!denReached } : null));
+  const lastTo = travelled(items, denKey ? { reached: !!denReached } : null);
+  return { done, unlock, leaving, denLit, lastFrom, lastTo, before: before.map((item) => item.status) };
+}
+
 // Logged out: the next student starts a new session.
 export function forgetPathMotion() {
   opened.clear();
   lastSeen.clear();
+  shownStatus.clear();
 }

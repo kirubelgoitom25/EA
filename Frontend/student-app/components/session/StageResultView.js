@@ -1,7 +1,7 @@
 import React from "react";
 import { StyleSheet, View } from "react-native";
 
-import { space, tokens, type } from "../../theme";
+import { level, space, tokens, type } from "../../theme";
 import AppText from "../ui/AppText";
 import Button from "../ui/Button";
 import Screen from "../ui/Screen";
@@ -25,6 +25,7 @@ export default function StageResultView({
 
   return (
     <Screen
+      background={level.lessonBg}
       footer={
         <View>
           {nextStageNumber ? (

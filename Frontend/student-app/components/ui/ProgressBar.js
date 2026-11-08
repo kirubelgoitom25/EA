@@ -9,7 +9,8 @@ import { useReducedMotion } from "./motion";
 // value is 0..1; the fill eases to its new width (instantly with Reduce
 // Motion). onPlum = the darker track used on the plum card. fill / track: plain colours instead of
 // the Tail and the usual track (the neutral path screens use moss on stone). intro: { delay, duration }
-// to fill from empty when the bar first appears.
+// to fill from empty when the bar first appears. change: { delay, duration } for later changes (a path's
+// advance fills its bar in step with the line).
 export default function ProgressBar({
   value = 0,
   height = 8,
@@ -17,6 +18,7 @@ export default function ProgressBar({
   fill,
   track,
   intro,
+  change,
   style,
   accessibilityLabel,
 }) {
@@ -26,7 +28,7 @@ export default function ProgressBar({
   const firstFill = useRef(intro);
 
   useEffect(() => {
-    const { delay = 0, duration = motion.base } = firstFill.current ?? {};
+    const { delay = 0, duration = motion.base } = firstFill.current ?? change ?? {};
     firstFill.current = null;
     if (reduceMotion) {
       width.setValue(clamped);

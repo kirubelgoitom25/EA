@@ -44,7 +44,8 @@ const LID_TOP = 54;
 const LID_W = 15;
 const LID_H = 17.5;
 
-export default function FoxPeek({ side = "right" }) {
+// quiet: a passing copy of her (while she moves to another step): no words, no petting.
+export default function FoxPeek({ side = "right", quiet = false }) {
   const reduce = useReducedMotion();
   const react = useFoxReact();
   const reaction = useFoxReaction(true);
@@ -92,7 +93,7 @@ export default function FoxPeek({ side = "right" }) {
   return (
     <View pointerEvents="box-none" style={styles.box}>
       <Animated.View pointerEvents="box-none" style={[styles.box, breathing]}>
-        <Pressable onPress={() => react("tap")} accessibilityRole="button" accessibilityLabel="Pet the fox">
+        <Pressable onPress={() => react("tap")} disabled={quiet} accessible={!quiet} accessibilityRole="button" accessibilityLabel="Pet the fox">
           <Image source={HEAD} style={styles.head} resizeMode="contain" />
           {reduce
             ? null
@@ -107,7 +108,7 @@ export default function FoxPeek({ side = "right" }) {
               ))}
         </Pressable>
       </Animated.View>
-      {text ? (
+      {text && !quiet ? (
         <View pointerEvents="none" style={[styles.bubbleBox, side === "left" ? styles.bubbleLeft : styles.bubbleRight]}>
           <View style={styles.bubble} accessibilityLiveRegion="polite">
             <AppText variant="label" numberOfLines={2}>

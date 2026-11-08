@@ -1,5 +1,5 @@
-import React, { useEffect, useRef, useState } from "react";
-import { Animated, Pressable, ScrollView, StyleSheet, View, useWindowDimensions } from "react-native";
+import React, { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
+import { Animated, Easing, Pressable, ScrollView, StyleSheet, View, useWindowDimensions } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -8,8 +8,10 @@ import { accessLine, canRenew } from "../services/access";
 import { loadProgressSummary } from "../services/chapterProgress";
 import { hasSeen, markSeen } from "../services/journey";
 import { chapterWord, isCourseComplete } from "../services/journeyModel";
-import { layout, space, stone, tokens } from "../theme";
+import { layout, levelLabel, space, stone, tokens } from "../theme";
 import BottomNavBar from "./BottomNavBar";
+import { PANEL_HEIGHT, cachedChapter, prefetchChapter } from "./ChapterPathScreen";
+import { chapterPath } from "./chapterPathModel";
 import JourneyMoment from "./JourneyMoment";
 import { firstOpenChapter, flattenChapters } from "./session/sessionModel";
 import AppText from "./ui/AppText";
@@ -21,7 +23,11 @@ import Emblem from "./ui/Emblem";
 import EmptyState from "./ui/EmptyState";
 import { LEDGE_FOX, scaleOf } from "./ui/foxPlacement";
 import { useFoxReact } from "./ui/FoxContext";
-import { ARRIVAL } from "./ui/pathMotionModel";
+import { ADVANCE, ARRIVAL, SCREEN } from "./ui/pathMotionModel";
+import { handOff, takeHandoff } from "./ui/handoff";
+import { pathPoints } from "./ui/pathModel";
+import Rock, { rockBox } from "./ui/Rock";
+import { win } from "./ui/StepMorph";
 import ProgressBar from "./ui/ProgressBar";
 import Route, { routeMetrics } from "./ui/Route";
 import { NAV_BAR_HEIGHT, TAB_BAR_HEIGHT } from "./ui/Screen";
@@ -33,6 +39,9 @@ import StatusBarScrim, { scrimOnScroll } from "./ui/StatusBarScrim";
 // fox stands at the chapter you're on, which opens into a card with one button. Every chapter is open
 // (nothing is locked); the path just shows where to go next. The page scrolls to your chapter.
 // The first time the last chapter is done, the finale plays once.
+// the bar fills in step with the path's advance
+const BAR_CHANGE = { delay: ADVANCE.lead + ADVANCE.bar[0], duration: ADVANCE.bar[1] - ADVANCE.bar[0] };
+
 export default function CourseScreen({
   userId,
   course,
@@ -174,8 +183,79 @@ export default function CourseScreen({
   const scrim = scrimOnScroll(24, scrolled, setScrolled);
   const jumpToNow = () => scroll.current?.scrollTo({ y: Math.max(0, nodeY() - screenHeight * 0.35), animated: true });
 
+  // The chapter you are on is loaded ahead, so it opens at once and its tile knows where to travel.
+  useEffect(() => {
+    if (next) prefetchChapter(userId, next.id);
+  }, [userId, next?.id]);
+
+  // Back from a chapter page: this page fades in (from a little larger) and its advance waits for it.
+  const [arriving] = useState(() => (!reduce && takeHandoff("backToCourse", course.id) ? new Animated.Value(0) : null));
+  useEffect(() => {
+    if (!arriving) return undefined;
+    const run = Animated.timing(arriving, { toValue: 1, duration: SCREEN.back.in, easing: Easing.inOut(Easing.quad), useNativeDriver: true });
+    run.start();
+    return () => run.stop();
+  }, [arriving]);
+
+  // Continue on the chapter you are on: the page leaves (SCREEN.exit) and the chapter's tile travels to
+  // where its current lesson will be on the chapter page, which then starts from that very frame. Only
+  // when that lesson is known (the chapter was loaded ahead) and lands on the first screen; otherwise
+  // (and with reduce motion) the chapter simply opens. A tap while it plays finishes it at once.
+  const scrollNow = useRef(0);
+  // One clock for the whole exit, wired into the page from the start (at rest at 0), so starting it
+  // needs no re-render of this heavy page: only the travelling tile draws itself.
+  const exitClock = useRef(new Animated.Value(0)).current;
+  const exit = useMemo(() => (nextIndex >= 0 ? { clock: exitClock, index: nextIndex } : null), [exitClock, nextIndex]);
+  const exitLooks = useMemo(
+    () => ({
+      title: { opacity: win(exitClock, SCREEN.exit.title, 1, 0) },
+      others: { opacity: win(exitClock, SCREEN.exit.others, 1, 0) },
+      tabs: { transform: [{ translateY: win(exitClock, SCREEN.exit.tabs, 0, SCREEN.exit.tabsPx) }] },
+    }),
+    [exitClock],
+  );
+  useEffect(() => () => exitClock.stopAnimation(), [exitClock]);
+  const flyer = useRef(null);
+  const flight = useRef(null); // the plan while it plays
+  const left = useRef(false);
+  const finishLeaving = () => {
+    const plan = flight.current;
+    if (!plan || left.current) return;
+    left.current = true;
+    handOff("lessons", plan.chapter.id, { target: plan.target });
+    onSelectLesson(plan.chapter);
+  };
+  const travelPlan = (i) => {
+    const chapter = chapters[i];
+    const cached = cachedChapter(userId, chapter.id);
+    if (!cached || cached.phase !== "ready") return null;
+    const path = chapterPath(cached, chapter);
+    const target = path.nextAt;
+    if (target < 0) return null;
+    const pathWidth = screenWidth - layout.gutter * 2;
+    const there = pathPoints(path.routeItems, true, pathWidth, true, true, { frame: screenWidth });
+    const to = { x: layout.gutter + there.points[target].x, y: insets.top + PANEL_HEIGHT + space.xl + there.layout.centers[target] };
+    if (to.y + 90 > screenHeight) return null;
+    const here = pathPoints(items, true, pathWidth, true, true, { frame: screenWidth });
+    const from = { x: layout.gutter + here.points[i].x, y: routeTop.current + here.layout.centers[i] - scrollNow.current };
+    return { chapter, target, from, to, iconTo: LESSON_ICONS[path.routeItems[target].type] ?? "play" };
+  };
+  const openChapter = (i) => {
+    if (flight.current) return finishLeaving();
+    const plan = i === nextIndex && !reduce ? travelPlan(i) : null;
+    if (!plan) return onSelectLesson(chapters[i]);
+    flight.current = plan;
+    // the tile draws itself, then starts the clock; the page switches once its last frame is on screen
+    return flyer.current?.launch(plan, finishLeaving);
+  };
+
   return (
-    <View style={styles.root}>
+    <Animated.View
+      style={[
+        styles.root,
+        arriving ? { opacity: arriving, transform: [{ scale: arriving.interpolate({ inputRange: [0, 1], outputRange: [SCREEN.back.inScale, 1] }) }] } : null,
+      ]}
+    >
       {/* "ledge": the fox stands on the tab bar, drawn under the page so the path scrolls over her */}
       {mascotVariant === "ledge" ? (
         <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, arrival?.looks.fox]}>
@@ -196,6 +276,7 @@ export default function CourseScreen({
           scrim(event);
           checkAway(event.nativeEvent.contentOffset.y, event.nativeEvent.layoutMeasurement.height);
           routeScroll.setValue(event.nativeEvent.contentOffset.y - routeTop.current);
+          scrollNow.current = event.nativeEvent.contentOffset.y;
         }}
         scrollEventThrottle={32}
       >
@@ -203,10 +284,13 @@ export default function CourseScreen({
 
         <Animated.View style={[styles.header, { paddingTop: insets.top + 60 }, arrival?.looks.header]}>
           <Emblem course={course} size={48} radius={15} />
-          <View style={styles.titleBlock}>
-            <AppText variant="title" numberOfLines={2} style={styles.title}>
-              {course.title}
-            </AppText>
+          <Animated.View style={[styles.titleBlock, exitLooks.title]}>
+            <View>
+              <AppText style={levelLabel}>COURSE</AppText>
+              <AppText variant="title" numberOfLines={2} style={styles.title}>
+                {course.title}
+              </AppText>
+            </View>
             {total > 0 ? (
               <ProgressBar
                 value={doneCount / total}
@@ -214,6 +298,7 @@ export default function CourseScreen({
                 fill={stone.moss}
                 track={stone.rockLight}
                 intro={arrival ? ARRIVAL.bar : undefined}
+                change={BAR_CHANGE}
                 accessibilityLabel={`${doneCount} of ${total} ${chapterWord(total)} done`}
               />
             ) : null}
@@ -225,7 +310,7 @@ export default function CourseScreen({
                 </AppText>
               </Pressable>
             ) : null}
-          </View>
+          </Animated.View>
         </Animated.View>
 
         {total === 0 ? (
@@ -253,18 +338,22 @@ export default function CourseScreen({
                 title: finished ? "You reached the den" : "The den",
                 caption: finished ? "Course complete" : `${total - doneCount} ${chapterWord(total - doneCount)} to go`,
               }}
-              onPress={(i) => onSelectLesson(chapters[i])}
+              exit={exit}
+              advanceLead={arriving ? SCREEN.back.lead : undefined}
+              onPress={openChapter}
             />
           </View>
         )}
 
         {onToggleMine ? (
+          <Animated.View style={exitLooks.others}>
           <Button
             variant="text"
             label={isMine ? "Remove from your courses" : "Add to your courses"}
             onPress={onToggleMine}
             style={styles.toggleMine}
           />
+          </Animated.View>
         ) : null}
       </ScrollView>
 
@@ -296,15 +385,24 @@ export default function CourseScreen({
         <Ionicons name="chevron-back" size={22} color={tokens.text} />
       </Pressable>
 
-      <BottomNavBar
-        active="courses"
-        onNavigate={(tab) => {
-          if (tab === "home") onHome();
-          if (tab === "courses") onCourses();
-          if (tab === "ranking") onRanking();
-          if (tab === "profile") onProfile();
-        }}
-      />
+      {/* the tab bar slides away as the page leaves for a chapter (the chapter page has none) */}
+      <Animated.View
+        pointerEvents="box-none"
+        style={[StyleSheet.absoluteFill, exitLooks.tabs]}
+      >
+        {/* ...and slides up into place as the page first arrives (arrival.js) */}
+        <Animated.View pointerEvents="box-none" style={[StyleSheet.absoluteFill, arrival?.looks.tabs]}>
+        <BottomNavBar
+          active="courses"
+          onNavigate={(tab) => {
+            if (tab === "home") onHome();
+            if (tab === "courses") onCourses();
+            if (tab === "ranking") onRanking();
+            if (tab === "profile") onProfile();
+          }}
+        />
+        </Animated.View>
+      </Animated.View>
 
       {finale ? (
         <View style={StyleSheet.absoluteFill}>
@@ -322,9 +420,70 @@ export default function CourseScreen({
           />
         </View>
       ) : null}
-    </View>
+
+      <FlyingTile ref={flyer} clock={exitClock} onTap={finishLeaving} />
+    </Animated.View>
   );
 }
+
+const LESSON_ICONS = { video: "play", reading: "document-text", questions: "help" };
+
+// The current chapter's tile on its way to the chapter page (SCREEN.exit.tile), ring and all; on the
+// way its icon turns into the lesson's. It plays no routine. While it flies, a tap anywhere finishes
+// the move at once. launch(plan, onDone) draws it and then runs the page's exit clock.
+const FlyingTile = forwardRef(function FlyingTile({ clock, onTap }, ref) {
+  const [flight, setFlight] = useState(null); // { plan, onDone }
+  useImperativeHandle(ref, () => ({ launch: (plan, onDone) => setFlight({ plan, onDone }) }), []);
+  useEffect(() => {
+    if (!flight) return undefined;
+    let run = null;
+    const frame = requestAnimationFrame(() => {
+      // once it has landed the chapter page starts building; meanwhile the tile settles with a small
+      // bump, so the moment that takes is part of the move rather than a pause
+      const [b0, b1] = SCREEN.exit.settle;
+      run = Animated.timing(clock, { toValue: SCREEN.exit.end, duration: SCREEN.exit.end, easing: Easing.linear, useNativeDriver: true });
+      run.start(({ finished }) => {
+        if (!finished) return;
+        run = Animated.timing(clock, { toValue: b1, duration: b1 - b0, easing: Easing.linear, useNativeDriver: true });
+        run.start();
+        flight.onDone();
+      });
+    });
+    return () => {
+      cancelAnimationFrame(frame);
+      run?.stop();
+    };
+  }, [flight, clock]);
+  const look = useMemo(() => {
+    if (!flight) return null;
+    const { from, to } = flight.plan;
+    const along = (a, b) => win(clock, SCREEN.exit.tile, 0, b - a);
+    return {
+      box: {
+        transform: [
+          { translateX: along(from.x, to.x) },
+          { translateY: along(from.y, to.y) },
+          { scale: clock.interpolate({ inputRange: [SCREEN.exit.settle[0], (SCREEN.exit.settle[0] + SCREEN.exit.settle[1]) / 2, SCREEN.exit.settle[1]], outputRange: [1, 1.045, 1], extrapolate: "clamp" }) },
+        ],
+      },
+      icon: { opacity: win(clock, SCREEN.exit.icon, 0, 1) },
+    };
+  }, [flight, clock]);
+  if (!flight) return null;
+  const { plan } = flight;
+  const box = rockBox(84);
+  return (
+    <>
+      <Pressable style={StyleSheet.absoluteFill} onPress={onTap} accessible={false} importantForAccessibility="no" />
+      <Animated.View pointerEvents="none" style={[{ position: "absolute", left: plan.from.x - box.cx, top: plan.from.y - box.cy }, look.box]}>
+        <Rock status="next" size={84} icon="play" ring wait={60000} />
+        <Animated.View style={[StyleSheet.absoluteFill, look.icon]}>
+          <Rock status="next" size={84} icon={plan.iconTo} ring wait={60000} />
+        </Animated.View>
+      </Animated.View>
+    </>
+  );
+});
 
 const styles = StyleSheet.create({
   accessLine: { marginTop: space.xs },

@@ -1,9 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Image, Linking, Platform, Pressable, StyleSheet, View } from "react-native";
+import { Image, Linking, Platform, Pressable, StyleSheet, View } from "react-native";
 import { Feather } from "@expo/vector-icons";
 
 import { space, tokens } from "../../theme";
 import AppText from "./AppText";
+import { BONE, VideoSkeleton } from "./Skeleton";
 import Button from "./Button";
 
 // A YouTube video played inside the app (YouTube's IFrame player in a WebView). It only plays: it
@@ -95,12 +96,15 @@ export default function YouTubePlayer({ videoId, url }) {
   }
 
   return (
-    <View style={styles.playerFrame} accessibilityLabel="Video player">
+    // While the player loads, its frame is a soft grey shape and the player itself stays invisible
+    // (an Android WebView paints over views laid on top of it, so it is hidden rather than covered).
+    <View style={[styles.playerFrame, phase === "loading" && styles.playerLoading]} accessibilityLabel="Video player">
+      {phase === "loading" ? <VideoSkeleton /> : null}
       <WebView
         key={attempt}
         source={{ html, baseUrl: EMBED_ORIGIN }}
         originWhitelist={["*"]}
-        style={styles.web}
+        style={[styles.web, phase === "loading" && styles.hidden]}
         javaScriptEnabled
         domStorageEnabled
         allowsInlineMediaPlayback
@@ -124,14 +128,6 @@ export default function YouTubePlayer({ videoId, url }) {
           return false;
         }}
       />
-      {phase === "loading" ? (
-        <View style={styles.loading} pointerEvents="none">
-          <ActivityIndicator color={tokens.onAccentStrong} />
-          <AppText variant="caption" style={styles.loadingText}>
-            Loading video…
-          </AppText>
-        </View>
-      ) : null}
     </View>
   );
 }
@@ -175,14 +171,8 @@ const styles = StyleSheet.create({
   // No overflow clipping around the WebView: on Android a clipped, rounded parent can stop it painting.
   playerFrame: { width: "100%", aspectRatio: 16 / 9, backgroundColor: "#000" },
   web: { flex: 1, width: "100%", backgroundColor: "#000" },
-  loading: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: tokens.plum,
-    alignItems: "center",
-    justifyContent: "center",
-    gap: space.sm,
-  },
-  loadingText: { color: tokens.onPlumSecondary },
+  playerLoading: { backgroundColor: BONE },
+  hidden: { opacity: 0 },
   fallbackWrap: { gap: space.sm },
   thumb: { ...StyleSheet.absoluteFillObject, opacity: 0.85 },
   play: {

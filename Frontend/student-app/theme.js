@@ -79,6 +79,28 @@ export const stone = {
   hereEdge: "#467F62",
 };
 
+// The three levels of a course, each a shade of green (see the level-1/2/3 reference pages):
+// the course page on white, the chapter page with a pale green header panel, and the lesson and
+// practice screens on a soft green ground. label: the small "COURSE" / "CHAPTER 3" / stage words
+// (5.5:1 on white, 4.9:1 on the panel, 5.1:1 on the lesson ground).
+export const level = {
+  label: "#3F7359",
+  panel: "#EAF4EE", // chapter page header
+  panelRadius: 28,
+  barTrack: "#D3E7DA",
+  barFill: "#5E9C7D",
+  lessonBg: "#F2F7F4", // lesson and practice screens
+  segmentDone: "#5E9C7D",
+  segmentNow: "#A9D3BC",
+  segmentAhead: "#DFE7E2",
+  card: "#D6E3DA", // answer cards: border and bottom edge
+  cardRadius: 20,
+  blank: "#DFEBE3", // the gap in a sentence
+};
+
+// The small level words: 12 dp, extra bold, letter-spaced.
+export const levelLabel = { fontFamily: "PlusJakartaSans_800ExtraBold", fontSize: 12, lineHeight: 16, letterSpacing: 1, color: level.label };
+
 // The Tail as gradient stops (for expo-linear-gradient / SVG).
 export const TAIL = [tokens.tailStart, tokens.tailMid, tokens.tailEnd];
 

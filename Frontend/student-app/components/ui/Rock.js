@@ -19,7 +19,7 @@ const LOOKS = {
 };
 export const ROCKS = LOOKS;
 
-const LIP = 6; // the solid bottom edge
+export const LIP = 6; // the solid bottom edge
 const PRESS = 5; // how far a tap sinks the key (the edge goes from 6 to 1)
 const LOOP = 6000; // the current step's routine, in ms
 
@@ -211,7 +211,7 @@ export default function Rock({ status = "todo", size = 84, icon, children, ring 
 
 // The step's icon. Chapters use drawn check / play / star; other steps (reading, questions) use
 // their Ionicons glyph.
-function Glyph({ name, ink, k }) {
+export function Glyph({ name, ink, k }) {
   if (name === "checkmark") {
     const s = 38 * k;
     return (

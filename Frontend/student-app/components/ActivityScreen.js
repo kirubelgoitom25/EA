@@ -6,7 +6,7 @@ import { completeActivity } from "../services/api";
 import { feedback } from "../services/feedback";
 import { youtubeId } from "../services/activitySteps";
 import { cheerFor } from "../services/journeyModel";
-import { space, tokens } from "../theme";
+import { level, space, tokens } from "../theme";
 import AppText from "./ui/AppText";
 import Button from "./ui/Button";
 import { Entrance } from "./ui/anim";
@@ -81,7 +81,7 @@ export default function ActivityScreen({ activity, context, next, onNext, closin
     : null;
 
   return (
-    <Screen footer={footer}>
+    <Screen footer={footer} background={level.lessonBg}>
       <Header title={activity.title} subtitle={where} backLabel="chapter" onBack={onBack} />
       {context?.steps > 1 ? <StepBar step={context.step} steps={context.steps} course={context.courseTitle} /> : null}
 
@@ -161,9 +161,9 @@ const styles = StyleSheet.create({
   body: { marginTop: space.lg },
   stepBar: { marginTop: space.lg, gap: space.sm },
   segments: { flexDirection: "row", gap: 6 },
-  segment: { flex: 1, height: 6, borderRadius: 3, backgroundColor: tokens.neutralTint },
-  segmentDone: { backgroundColor: tokens.tailMid },
-  segmentNow: { backgroundColor: tokens.accent },
+  segment: { flex: 1, height: 6, borderRadius: 3, backgroundColor: level.segmentAhead },
+  segmentDone: { backgroundColor: level.segmentDone },
+  segmentNow: { backgroundColor: level.segmentNow },
   videoWrap: { gap: space.md },
   hint: { textAlign: "center" },
   reading: { gap: space.lg },

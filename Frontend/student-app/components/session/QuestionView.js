@@ -2,7 +2,7 @@ import React from "react";
 import { Pressable, StyleSheet, TextInput, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 
-import { fonts, layout, space, tokens, type } from "../../theme";
+import { fonts, layout, level, levelLabel, space, tokens, type } from "../../theme";
 import AppText from "../ui/AppText";
 import { BLANK, splitBlank } from "./sessionModel";
 
@@ -36,7 +36,7 @@ export default function QuestionView({
 
   return (
     <View>
-      <AppText variant="overline" tone="secondary">
+      <AppText style={levelLabel}>
         STAGE {stageNumber} · {HEADINGS[question.kind]}
       </AppText>
 
@@ -95,9 +95,12 @@ function Prompt({ question, slot, slotTone }) {
   return (
     <AppText style={styles.prompt}>
       {split.before}
-      <AppText style={[styles.prompt, slotStyle]}>
-        {filled ? ` ${slot} ` : "        "}
-      </AppText>
+      {filled ? (
+        <AppText style={[styles.prompt, slotStyle]}>{` ${slot} `}</AppText>
+      ) : (
+        // the empty gap: a soft rounded box in the line, 64 x 30
+        <View accessible accessibilityLabel="blank" style={styles.blank} />
+      )}
       {split.after}
     </AppText>
   );
@@ -131,13 +134,16 @@ function Options({ question, answer, answered, onChoose }) {
   );
 }
 
+// An answer is a white card with a 2 dp border and a 4 dp edge under it; a tap presses it down onto
+// that edge. After answering, the right / wrong / chosen colours take over (the edge follows them).
 const TILE = {
-  idle: { bg: tokens.surface, border: tokens.divider, text: tokens.text, width: 1.5 },
-  chosen: { bg: tokens.accentTint, border: tokens.accent, text: tokens.text, width: 2 },
-  correct: { bg: tokens.correct, border: tokens.correct, text: "#FFFFFF", width: 1.5, badge: "correct" },
-  wrong: { bg: tokens.wrongTint, border: tokens.wrong, text: tokens.text, width: 2, badge: "wrong" },
-  dimmed: { bg: tokens.surface, border: tokens.divider, text: tokens.textTertiary, width: 1.5 },
+  idle: { bg: tokens.surface, border: level.card, edge: level.card, text: tokens.text },
+  chosen: { bg: tokens.accentTint, border: tokens.accent, edge: tokens.accent, text: tokens.text },
+  correct: { bg: tokens.correct, border: tokens.correct, edge: tokens.correct, text: "#FFFFFF", badge: "correct" },
+  wrong: { bg: tokens.wrongTint, border: tokens.wrong, edge: tokens.wrong, text: tokens.text, badge: "wrong" },
+  dimmed: { bg: tokens.surface, border: level.card, edge: level.card, text: tokens.textSecondary },
 };
+const EDGE = 4;
 
 function Tile({ label, state, disabled, compact, tall, onPress }) {
   const look = TILE[state];
@@ -151,36 +157,44 @@ function Tile({ label, state, disabled, compact, tall, onPress }) {
         state === "correct" ? `${label}, correct answer` : state === "wrong" ? `${label}, your answer` : label
       }
       accessibilityState={{ disabled }}
-      style={({ pressed }) => [
-        compact ? styles.tileRow : styles.tile,
-        tall && styles.tileTall,
-        { backgroundColor: look.bg, borderColor: look.border, borderWidth: look.width },
-        pressed && !disabled && styles.tilePressed,
-      ]}
+      style={[compact ? styles.slotRow : styles.slot, tall && styles.slotTall]}
     >
-      <AppText
-        style={[
-          compact ? styles.tileTextRow : styles.tileText,
-          { color: look.text },
-        ]}
-      >
-        {label}
-      </AppText>
-      {look.badge ? (
-        <View
-          style={[
-            styles.badge,
-            compact ? styles.badgeRow : styles.badgeCorner,
-            { backgroundColor: look.badge === "correct" ? "#FFFFFF" : tokens.wrong },
-          ]}
-        >
-          <Ionicons
-            name={look.badge === "correct" ? "checkmark" : "close"}
-            size={15}
-            color={look.badge === "correct" ? tokens.correct : "#FFFFFF"}
-          />
-        </View>
-      ) : null}
+      {({ pressed }) => (
+        <>
+          <View style={[styles.edge, { backgroundColor: look.edge }]} />
+          <View
+            style={[
+              compact ? styles.tileRow : styles.tile,
+              { backgroundColor: look.bg, borderColor: look.border },
+              pressed && !disabled && styles.tilePressed,
+            ]}
+          >
+            <AppText
+              style={[
+                compact ? styles.tileTextRow : styles.tileText,
+                { color: look.text },
+              ]}
+            >
+              {label}
+            </AppText>
+            {look.badge ? (
+              <View
+                style={[
+                  styles.badge,
+                  compact ? styles.badgeRow : styles.badgeCorner,
+                  { backgroundColor: look.badge === "correct" ? "#FFFFFF" : tokens.wrong },
+                ]}
+              >
+                <Ionicons
+                  name={look.badge === "correct" ? "checkmark" : "close"}
+                  size={15}
+                  color={look.badge === "correct" ? tokens.correct : "#FFFFFF"}
+                />
+              </View>
+            ) : null}
+          </View>
+        </>
+      )}
     </Pressable>
   );
 }
@@ -192,16 +206,25 @@ const styles = StyleSheet.create({
 
   prompt: {
     fontFamily: fonts.display,
-    fontSize: 28,
-    lineHeight: 38,
+    fontSize: 26,
+    lineHeight: 36,
     letterSpacing: -0.4,
     color: tokens.text,
     marginTop: space.md,
   },
 
   slotEmpty: {
-    backgroundColor: tokens.accentTint,
+    backgroundColor: level.blank,
     marginTop: 0,
+  },
+
+  blank: {
+    width: 64,
+    height: 30,
+    marginHorizontal: 4,
+    borderRadius: 8,
+    backgroundColor: level.blank,
+    transform: [{ translateY: 5 }], // sits on the line, like the words around it
   },
 
   slotCorrect: {
@@ -220,7 +243,7 @@ const styles = StyleSheet.create({
     marginTop: space.xxl,
     flexDirection: "row",
     flexWrap: "wrap",
-    gap: space.md,
+    gap: 14,
   },
 
   list: {
@@ -228,23 +251,47 @@ const styles = StyleSheet.create({
     gap: space.md,
   },
 
-  tile: {
+  // A card's place: the card itself plus the 4 dp edge showing under it.
+  slot: {
     flexBasis: "47%",
     flexGrow: 1,
-    height: 96,
-    borderRadius: layout.tileRadius,
+    height: 88 + EDGE,
+  },
+
+  slotTall: {
+    height: 112 + EDGE,
+  },
+
+  slotRow: {
+    paddingBottom: EDGE,
+  },
+
+  edge: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    top: EDGE,
+    bottom: 0,
+    borderRadius: level.cardRadius,
+  },
+
+  tile: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    top: 0,
+    bottom: EDGE,
+    borderRadius: level.cardRadius,
+    borderWidth: 2,
     alignItems: "center",
     justifyContent: "center",
     paddingHorizontal: space.md,
   },
 
-  tileTall: {
-    height: 112,
-  },
-
   tileRow: {
     minHeight: 64,
-    borderRadius: layout.tileRadius - 4,
+    borderRadius: level.cardRadius,
+    borderWidth: 2,
     flexDirection: "row",
     alignItems: "center",
     paddingHorizontal: space.lg,
@@ -252,13 +299,15 @@ const styles = StyleSheet.create({
     gap: space.md,
   },
 
+  // pressed down onto its edge
   tilePressed: {
-    backgroundColor: tokens.accentTint,
-    borderColor: tokens.accent,
+    transform: [{ translateY: EDGE }],
   },
 
   tileText: {
     ...type.answer,
+    fontSize: 20,
+    lineHeight: 26,
     textAlign: "center",
   },
 

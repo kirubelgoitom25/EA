@@ -1,19 +1,21 @@
 import React from "react";
-import { Pressable, StyleSheet, View } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
+import { StyleSheet, View } from "react-native";
+import Svg, { Path } from "react-native-svg";
 
 import { space, tokens } from "../theme";
 import BottomNavBar from "./BottomNavBar";
 import AppText from "./ui/AppText";
-import CourseCard from "./ui/CourseCard";
+import CourseCard, { NAME_LEFT } from "./ui/CourseCard";
 import EmptyState from "./ui/EmptyState";
-import Header from "./ui/Header";
+import PressLip from "./ui/PressLip";
 import Screen from "./ui/Screen";
+import { RowsSkeleton } from "./ui/Skeleton";
 
-// The Courses tab: the courses the student added, one slim row each (art, title, thin progress bar). Finding more is on the Explore page (the + at the top right).
+// The Courses tab: the courses the student added, one full-width tinted card each. Finding more is on the Explore page (the + at the top right).
 export default function CoursesScreen({
   courses = [],
   myCourseIds = [],
+  loading = false, // "Your courses" is still being read from the phone
   onExplore,
   onSelectCourse,
   onHome,
@@ -25,36 +27,45 @@ export default function CoursesScreen({
 
   return (
     <View style={styles.root}>
-      <Screen withTabBar>
-        <Header
-          title="Courses"
-          right={
-            courses.length > 0 ? (
-              <Pressable
-                onPress={onExplore}
-                hitSlop={space.sm}
-                accessibilityRole="button"
-                accessibilityLabel="Explore courses"
-                style={({ pressed }) => [styles.add, pressed && styles.addPressed]}
-              >
-                <Ionicons name="add" size={22} color={tokens.accent} />
-              </Pressable>
-            ) : null
-          }
-        />
+      <Screen withTabBar contentStyle={styles.content}>
+        <View style={styles.header}>
+          <AppText variant="display" accessibilityRole="header" style={styles.title}>
+            Courses
+          </AppText>
+          {courses.length > 0 ? (
+            <PressLip
+              onPress={onExplore}
+              hitSlop={space.sm}
+              accessibilityLabel="Explore courses"
+              lip={ADD_LIP}
+              lipSize={4}
+              radius={16}
+              faceStyle={styles.addFace}
+            >
+              <Svg width={24} height={24} viewBox="0 0 24 24" fill="none">
+                <Path d="M12 5v14M5 12h14" stroke={tokens.accentLip} strokeWidth={2.75} strokeLinecap="round" />
+              </Svg>
+            </PressLip>
+          ) : null}
+        </View>
 
         {courses.length === 0 ? (
           <EmptyState title="No courses yet" message="New courses will show up here soon." />
         ) : (
           <>
-            {mine.length === 0 ? (
+            {loading ? (
+              <RowsSkeleton count={2} height={72} />
+            ) : mine.length === 0 ? (
               <AppText tone="secondary" style={styles.hint}>
                 Tap + to find your first course.
               </AppText>
             ) : (
               <View>
-                {mine.map((course) => (
-                  <CourseCard key={course.id} course={course} onPress={onSelectCourse} />
+                {mine.map((course, index) => (
+                  <React.Fragment key={course.id}>
+                    {index > 0 ? <View style={styles.divider} /> : null}
+                    <CourseCard course={course} onPress={onSelectCourse} />
+                  </React.Fragment>
                 ))}
               </View>
             )}
@@ -75,36 +86,50 @@ export default function CoursesScreen({
   );
 }
 
+const ADD_LIP = "#CBE0D3"; // the add button's solid bottom edge
+
 const styles = StyleSheet.create({
   root: {
     flex: 1,
   },
 
-  flex: {
-    flex: 1,
+  // rows sit 16 dp from the screen edges; the title keeps 24 and the add button 20
+  content: {
+    paddingHorizontal: 16,
   },
 
-  pressed: {
-    opacity: 0.7,
+  header: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingLeft: 8,
+    paddingRight: 4,
+    marginBottom: 36,
   },
 
+  // between rows: from under the name to 24 dp from the right edge, 16 dp above and below
+  divider: {
+    height: 1,
+    marginVertical: 16,
+    marginLeft: NAME_LEFT,
+    marginRight: 8,
+    backgroundColor: "#EEEEEE",
+  },
+
+  title: {
+    letterSpacing: -0.96,
+  },
 
   hint: {
     paddingVertical: space.lg,
   },
 
-  // A soft orange tile with a plus, the same rounded shape as the course art.
-  add: {
-    width: 40,
-    height: 40,
-    borderRadius: 14,
+  // a pale sage tile with a green plus
+  addFace: {
+    width: 52,
+    height: 52,
     backgroundColor: tokens.accentTint,
     alignItems: "center",
     justifyContent: "center",
   },
-
-  addPressed: {
-    opacity: 0.7,
-  },
-
 });

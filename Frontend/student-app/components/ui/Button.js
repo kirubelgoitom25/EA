@@ -1,10 +1,11 @@
 import React from "react";
-import { ActivityIndicator, Animated, Easing, Pressable, StyleSheet } from "react-native";
+import { Animated, Easing, Pressable, StyleSheet } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 
 import { haptic } from "../../services/feedback";
 import { fonts, layout, space, tokens } from "../../theme";
 import AppText from "./AppText";
+import { usePulse } from "./Skeleton";
 
 // "primary" is the one main action on a screen: an ember pill with a
 // dark ink label and a lip that presses in. "text" is for everything else — no
@@ -41,6 +42,8 @@ export default function Button({
     return () => loop.stop();
   }, [invite, inactive, breathe]);
   const scale = breathe.interpolate({ inputRange: [0, 1], outputRange: [1, 1.03] });
+  // While it saves, the label fades softly between 60% and 100% (no spinner); the button takes no taps.
+  const pulse = usePulse(loading);
 
   const handlePress = () => {
     haptic.light();
@@ -63,10 +66,7 @@ export default function Button({
         style,
       ]}
     >
-      {loading ? (
-        <ActivityIndicator color={tokens.onAccent} />
-      ) : (
-        <>
+      <Animated.View style={[styles.content, { opacity: pulse }]}>
           {icon ? <Ionicons name={icon} size={20} color={tokens.onAccent} style={styles.icon} /> : null}
           <AppText
             variant="bodyStrong"
@@ -83,8 +83,7 @@ export default function Button({
           >
             {label}
           </AppText>
-        </>
-      )}
+      </Animated.View>
     </Pressable>
   );
 
@@ -95,6 +94,7 @@ export default function Button({
 const LIP = 5;
 
 const styles = StyleSheet.create({
+  content: { flexDirection: "row", alignItems: "center", justifyContent: "center" },
   primary: {
     height: layout.buttonHeight,
     borderRadius: layout.radius,

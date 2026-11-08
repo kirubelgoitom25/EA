@@ -1,9 +1,10 @@
 import React from "react";
-import { ScrollView, StyleSheet, View } from "react-native";
+import { Animated, ScrollView, StyleSheet, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { layout, space, tokens } from "../../theme";
 import DotGrid from "./DotGrid";
+import { usePulse } from "./Skeleton";
 
 // Height of <BottomNavBar> above the safe-area inset. Screens with a tab
 // bar add this to their bottom padding so content scrolls clear of it.
@@ -28,7 +29,9 @@ export default function Screen({
   contentStyle,
   grid = false,
   background,
+  pulsing = false, // refreshing: the content fades softly between 60% and 100% (still tappable)
 }) {
+  const pulse = usePulse(pulsing);
   const insets = useSafeAreaInsets();
   const bottomSpace = withTabBar ? TAB_BAR_HEIGHT + insets.bottom : insets.bottom;
 
@@ -46,7 +49,8 @@ export default function Screen({
       refreshControl={refreshControl}
     >
       {grid ? <DotGrid /> : null}
-      {children}
+      {/* only screens that refresh by pulling get the extra wrapper, so no other layout changes */}
+      {refreshControl ? <Animated.View style={{ opacity: pulse }}>{children}</Animated.View> : children}
     </ScrollView>
   ) : (
     <View style={[styles.flex, styles.content, contentStyle]}>{children}</View>
@@ -59,6 +63,7 @@ export default function Screen({
         <View
           style={[
             styles.footer,
+            background && { backgroundColor: background },
             { paddingBottom: space.lg + bottomSpace },
           ]}
         >

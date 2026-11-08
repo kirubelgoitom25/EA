@@ -9,6 +9,7 @@ import { displayName, rankEntries } from "./rankingModel";
 import AppText from "./ui/AppText";
 import EmptyState from "./ui/EmptyState";
 import Header from "./ui/Header";
+import { QUIET_REFRESH } from "./ui/Skeleton";
 import Screen from "./ui/Screen";
 
 const SCOPES = [
@@ -67,7 +68,8 @@ export default function RankingScreen({
     <View style={styles.root}>
       <Screen
         withTabBar
-        refreshControl={onRefresh ? <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor={tokens.accent} colors={[tokens.accent]} /> : undefined}
+        pulsing={refreshing}
+        refreshControl={onRefresh ? <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} {...QUIET_REFRESH} /> : undefined}
       >
         <Header title="Leaderboard" />
 

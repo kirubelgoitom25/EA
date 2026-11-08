@@ -7,7 +7,6 @@ import React, {
 } from "react";
 import {
   View,
-  ActivityIndicator,
   StyleSheet,
   Alert,
   AppState,
@@ -32,10 +31,12 @@ import LockedCourseScreen from "./components/LockedCourseScreen";
 import PurchaseScreen from "./components/PurchaseScreen";
 import PaymentRequestsScreen from "./components/PaymentRequestsScreen";
 import RankingScreen from "./components/RankingScreen";
-import ChapterPathScreen from "./components/ChapterPathScreen";
+import ChapterPathScreen, { forgetChapterCache } from "./components/ChapterPathScreen";
 import ActivityScreen from "./components/ActivityScreen";
 import JourneyMoment from "./components/JourneyMoment";
 import StageSession from "./components/session/StageSession";
+import BottomNavBar from "./components/BottomNavBar";
+import { HomeSkeleton } from "./components/ui/Skeleton";
 import { flattenChapters, nextChapter } from "./components/session/sessionModel";
 import { loadMyCourseIds, saveMyCourseIds } from "./services/myCourses";
 import { isLocked, withPurchased } from "./services/access";
@@ -103,6 +104,8 @@ export default function App() {
   const [stack, setStack] = useState([LOGIN]);
   const screen = currentScreen(stack);
   const [restoring, setRestoring] = useState(true);
+  // Whether the phone has a saved login (null until known): with none, the login screen shows at once.
+  const [savedSession, setSavedSession] = useState(null);
 
   const [student, setStudent] = useState(null);
   const [courses, setCourses] = useState([]);
@@ -142,6 +145,7 @@ export default function App() {
 
   const resetToLogin = useCallback(() => {
     forgetPathMotion();
+    forgetChapterCache();
     forgetCachedResponses();
     lastRefreshAt.current = 0;
     prefetched.current = null;
@@ -171,6 +175,7 @@ export default function App() {
     supabase.auth
       .getSession()
       .then(({ data: { session } }) => {
+        if (!cancelled) setSavedSession(!!session);
         if (session && !cancelled) {
           prefetched.current = {
             userId: session.user?.id,
@@ -178,7 +183,9 @@ export default function App() {
           };
         }
       })
-      .catch(() => {});
+      .catch(() => {
+        if (!cancelled) setSavedSession(false);
+      });
 
     restoreSession()
       .then((restoredUser) => {
@@ -718,12 +725,18 @@ export default function App() {
 
   const rankingEntries = Array.isArray(ranking?.entries) ? ranking.entries : [];
 
-  if (restoring || (!fontsLoaded && !fontError)) {
-    return (
-      <View style={styles.loadingScreen}>
-        <ActivityIndicator size="large" color={colors.orange} />
-      </View>
-    );
+  // Starting up or loading the student's data: Home's own layout in soft grey shapes (Home is where
+  // a logged-in student lands), never a spinner or a blank screen. With no saved login, the login
+  // screen shows straight away.
+  const homeSkeleton = (
+    <View style={styles.loadingScreen}>
+      <HomeSkeleton />
+      <BottomNavBar active="home" onNavigate={() => {}} />
+    </View>
+  );
+
+  if ((restoring && savedSession !== false && !user) || (!fontsLoaded && !fontError)) {
+    return homeSkeleton;
   }
 
   if (!user) {
@@ -741,11 +754,7 @@ export default function App() {
   }
 
   if (loadingData || !student) {
-    return (
-      <View style={styles.loadingScreen}>
-        <ActivityIndicator size="large" color={colors.orange} />
-      </View>
-    );
+    return homeSkeleton;
   }
 
   if (screen === "home") {
@@ -754,6 +763,7 @@ export default function App() {
         userId={user.id}
         user={student}
         courses={myCourses}
+        loading={myCourseIds === null}
         availableCount={courses.length}
         ranking={rankingEntries}
         {...navProps}
@@ -782,6 +792,7 @@ export default function App() {
       <CoursesScreen
         courses={courses}
         myCourseIds={myCourseIds ?? []}
+        loading={myCourseIds === null}
         onExplore={() => openScreen("explore")}
         onSelectCourse={openCourse}
         {...navProps}
@@ -967,8 +978,6 @@ const createStyles = (colors) =>
   StyleSheet.create({
     loadingScreen: {
       flex: 1,
-      justifyContent: "center",
-      alignItems: "center",
       backgroundColor: colors.screenBg,
     },
   });
