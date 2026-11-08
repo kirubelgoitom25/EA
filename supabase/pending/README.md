@@ -56,7 +56,15 @@ for every request that sends no submission id (older apps); only submits from th
 which send one, need the column. `submission_ids_rollback.sql` undoes it (deploy the previous
 backend first).
 
-# Accounts and EA Pro: pending SQL (NOT applied)
+# Accounts and EA Pro (APPLIED to live 2026-11-08, approved by the user)
+
+Applied 2026-11-08 in 854 ms, after a JSON backup of every public table
+(~/EA-backups/2026-11-08) and a full dry run on live inside a rolled-back transaction (18/18
+checks: Supabase's insert-then-update order saves username, phone and school; a taken phone is
+refused; dashboard-made accounts unchanged; apps cannot call apply_signup_details). Every
+existing table's row count unchanged; 1 priced course became `paid`, the rest `free`.
+
+Original notes:
 
 `20261108000000_accounts_and_pro.sql` adds username and phone to `profiles`, the
 `student_profiles`, `plans` and `memberships` tables, `courses.access_tier` (filled from the price:
