@@ -23,10 +23,14 @@ import {
 import LoginScreen from "./components/LoginScreen";
 import HomeScreen from "./components/HomeScreen";
 import ProfileScreen from "./components/ProfileScreen";
+import FeelLabScreen from "./components/FeelLabScreen";
+import { showFeelLab } from "./config";
 import CoursesScreen from "./components/CoursesScreen";
 import ExploreScreen from "./components/ExploreScreen";
 import CourseScreen from "./components/CourseScreen";
 import { forgetPathMotion } from "./components/ui/pathMotionModel";
+import { leaveTab, resetTabSession } from "./components/ui/tabMotion";
+import DiveIn from "./components/ui/DiveIn";
 import LockedCourseScreen from "./components/LockedCourseScreen";
 import PurchaseScreen from "./components/PurchaseScreen";
 import PaymentRequestsScreen from "./components/PaymentRequestsScreen";
@@ -41,6 +45,7 @@ import BottomNavBar from "./components/BottomNavBar";
 import { HomeSkeleton } from "./components/ui/Skeleton";
 import { flattenChapters, nextChapter } from "./components/session/sessionModel";
 import { loadMyCourseIds, saveMyCourseIds } from "./services/myCourses";
+import { loadCourseOpens, stampCourseOpen } from "./services/courseOpens";
 import { isLocked, isProCourse, withPurchased } from "./services/access";
 import { isAuthCallback } from "./services/authModel";
 import { finishGoogleSignIn, googleSignInInProgress, signInWithGoogle } from "./services/googleAuth";
@@ -77,6 +82,7 @@ import {
   currentScreen,
   push,
   switchTab,
+  TABS,
 } from "./navigation";
 
 const EMPTY_RANKING = { entries: [], yourPosition: null, yourXp: 0 };
@@ -131,6 +137,7 @@ export default function App() {
   const [selectedStage, setSelectedStage] = useState(null);
   // Courses added to "Your courses" (saved on the phone; null = loading).
   const [myCourseIds, setMyCourseIds] = useState(null);
+  const [courseOpens, setCourseOpens] = useState({}); // when each course was last opened (Courses tab order)
 
   // Used by refreshProgress (see below).
   const loggedIn = useRef(false);
@@ -172,6 +179,8 @@ export default function App() {
     setSelectedLesson(null);
     setSelectedStage(null);
     setMyCourseIds(null);
+    setCourseOpens({});
+    resetTabSession(); // a new session: the tab screens play their entrances again
     setStack([LOGIN]);
   }, []);
 
@@ -410,8 +419,14 @@ export default function App() {
     return () => subscription.remove();
   }, [user, refreshProgress]);
 
-  // Bottom-nav tabs start a fresh history.
-  const goTo = (tab) => showScreen(switchTab(stack, tab));
+  // Bottom-nav tabs start a fresh history. From one tab to another the old screen fades out first
+  // (tabMotion); from anywhere else the switch is immediate.
+  const goTo = (tab) => {
+    const next = switchTab(stack, tab);
+    if (next === stack) return;
+    if (stack.length === 1 && TABS.includes(screen)) leaveTab(tab, () => showScreen(next));
+    else showScreen(next);
+  };
 
   const openScreen = (target) => showScreen(push(stack, target));
 
@@ -614,6 +629,22 @@ export default function App() {
     };
   }, [user, student, courses, myCourseIds]);
 
+  // When each course was last opened, kept on the phone (see services/courseOpens).
+  useEffect(() => {
+    if (!user) return undefined;
+    let cancelled = false;
+    loadCourseOpens(user.id).then((opens) => {
+      if (!cancelled) setCourseOpens((now) => ({ ...opens, ...now }));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [user]);
+
+  const noteCourseOpened = (courseId) => {
+    if (user && courseId) setCourseOpens((now) => stampCourseOpen(user.id, now, courseId));
+  };
+
   const setMine = (ids) => {
     setMyCourseIds(ids);
     saveMyCourseIds(user.id, ids);
@@ -647,6 +678,7 @@ export default function App() {
 
   // A course not begun yet opens on its introduction (once); otherwise on its journey path.
   const openCourse = async (course) => {
+    noteCourseOpened(course.id);
     let intro = false;
     try {
       intro = !isLocked(course) && isFreshCourse(course) && !(await hasSeen(user.id, "intro", course.id));
@@ -702,6 +734,7 @@ export default function App() {
   // path instead, so those steps are not skipped. If its activities can't be loaded, behave as
   // before and go straight to the stage.
   const continueChapter = async (course, lesson) => {
+    noteCourseOpened(course.id);
     // A locked course opens on its own page, with the way to get access.
     if (isLocked(course)) {
       setSelectedCourse(course);
@@ -756,7 +789,7 @@ export default function App() {
     selectedLesson;
 
   // Shown on a back link: the screen you'd return to.
-  const BACK_LABELS = { home: "Home", courses: "Courses", explore: "Explore", profile: "Profile", payments: "Requests", pro: "EA Pro" };
+  const BACK_LABELS = { home: "Home", courses: "Courses", explore: "Explore", profile: "Profile", payments: "Requests", pro: "EA Pro", feel: "Feel lab" };
   const previousScreen = stack[stack.length - 2];
   const backLabel =
     previousScreen === "course" ? selectedCourse?.title : BACK_LABELS[previousScreen];
@@ -838,9 +871,14 @@ export default function App() {
         onLogout={handleLogout}
         onRequests={() => openScreen("payments")}
         onPro={openPro}
+        onFeelLab={showFeelLab ? () => openScreen("feel") : undefined}
         {...navProps}
       />
     );
+  }
+
+  if (screen === "feel") {
+    return <FeelLabScreen backLabel="Profile" onBack={goBack} />;
   }
 
   if (screen === "courses") {
@@ -848,6 +886,7 @@ export default function App() {
       <CoursesScreen
         courses={courses}
         myCourseIds={myCourseIds ?? []}
+        openedAt={courseOpens}
         loading={myCourseIds === null}
         onExplore={() => openScreen("explore")}
         onSelectCourse={openCourse}
@@ -916,6 +955,7 @@ export default function App() {
 
   if (screen === "course" && isLocked(selectedCourse)) {
     return (
+      <DiveIn id={selectedCourse.id}>
       <LockedCourseScreen
         course={selectedCourse}
         pro={pro}
@@ -925,13 +965,17 @@ export default function App() {
         onPro={openPro}
         onRequests={() => openScreen("payments")}
       />
+      </DiveIn>
     );
   }
 
   if (screen === "course") {
     return (
+      <DiveIn id={selectedCourse.id}>
       <CourseScreen
         userId={user.id}
+        student={student}
+        ranking={rankingEntries}
         course={selectedCourse}
         isMine={isMine(selectedCourse.id)}
         onToggleMine={() => toggleCourse(selectedCourse.id)}
@@ -941,11 +985,13 @@ export default function App() {
         onBack={goBack}
         {...navProps}
       />
+      </DiveIn>
     );
   }
 
   if (screen === "intro" && selectedCourse) {
     return (
+      <DiveIn id={selectedCourse.id}>
       <JourneyMoment
         key={selectedCourse.id}
         course={selectedCourse}
@@ -962,6 +1008,7 @@ export default function App() {
         onPress={startJourney}
         onBack={goBack}
       />
+      </DiveIn>
     );
   }
 
@@ -970,6 +1017,9 @@ export default function App() {
       <ChapterPathScreen
         key={currentLesson.id}
         userId={user.id}
+        student={student}
+        ranking={rankingEntries}
+        onRanking={navProps.onRanking}
         course={selectedCourse}
         chapterNumber={
           flattenChapters(selectedCourse).findIndex((lesson) => lesson.id === currentLesson.id) + 1 || null

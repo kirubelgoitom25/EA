@@ -1,116 +1,178 @@
 import React, { useRef } from "react";
-import { Animated, Easing, Pressable, StyleSheet, View } from "react-native";
+import { StyleSheet, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import Svg, { Path } from "react-native-svg";
 
 import { accessLine, isLocked } from "../../services/access";
+import { fonts, ui } from "../../theme";
+import { courseProgress } from "../coursesModel";
 import AppText from "./AppText";
 import CourseIcon from "./CourseIcon";
 import CourseRing from "./CourseRing";
+import { CURVE } from "./motion";
+import PressLip from "./PressLip";
+import ProgressBar from "./ProgressBar";
 
-export const COURSE_ROW = 96;
-export const NAME_LEFT = 106; // where the name (and the divider under it) starts, inside the row
-
-const SINK = 5; // how far a tap pushes the row down
-
-// A course in the Courses tab: a 96 dp row on white. Its icon sits inside a progress ring (chapters
-// done / total), then the name and "5 of 20 chapters", and a chevron. A finished course has a full
-// ring, a check badge on the icon and "Completed". A course not paid for keeps its access line and a
-// lock where the chevron would be.
-export default function CourseCard({ course, onPress }) {
-  const total = course.totalLessons ?? 0;
-  const done = course.completedLessons ?? 0;
-  const progress = total > 0 ? Math.min(1, done / total) : 0;
-  const finished = total > 0 && done >= total;
+// A course on the Courses tab (handoff part 3). A started course is the larger card with a green
+// edge, "2 of 4 chapters" and a progress bar; a finished one is a white card with a grey edge, a full
+// ring, a check badge and "Completed"; one not started looks like a finished card without the badge,
+// saying "Not started". Every card sinks when pressed. A course not paid for keeps its access line and
+// a lock where the chevron would be.
+// onPress(course, centre): centre is the card's middle on screen, where the course page dives in from.
+// fillAt: { delay } fills the bar from empty (the screen's first open); otherwise it just shows.
+export default function CourseCard({ course, onPress, fillAt }) {
+  const { total, done, value, state } = courseProgress(course);
   const locked = isLocked(course);
+  const big = state === "started";
   const count = `${done} of ${total} ${total === 1 ? "chapter" : "chapters"}`;
-  const sub = locked ? accessLine(course) : finished ? "Completed" : count;
+  const sub = locked ? accessLine(course) : state === "done" ? "Completed" : state === "new" ? "Not started" : count;
+  const box = useRef(null);
 
-  const press = useRef(new Animated.Value(0)).current;
-  const down = () =>
-    Animated.timing(press, { toValue: SINK, duration: 80, easing: Easing.out(Easing.quad), useNativeDriver: true }).start();
-  const up = () => Animated.spring(press, { toValue: 0, friction: 5, tension: 220, useNativeDriver: true }).start();
+  const press = () => {
+    if (!box.current) return onPress(course);
+    box.current.measureInWindow((x, y, width, height) => onPress(course, { x: x + width / 2, y: y + height / 2 }));
+  };
 
+  const ring = big ? RING_BIG : RING_SMALL;
   return (
-    <Pressable
-      onPress={() => onPress(course)}
-      onPressIn={down}
-      onPressOut={up}
-      accessibilityRole="button"
-      accessibilityLabel={`${course.title}, ${locked ? accessLine(course) : finished ? "completed" : `${done} of ${total} chapters`}`}
-    >
-      <Animated.View style={[styles.row, { transform: [{ translateY: press }] }]}>
-        <CourseRing progress={locked ? 0 : progress} style={styles.ring} />
-        <CourseIcon course={course} size={56} radius={16} style={styles.icon} />
+    <View ref={box} collapsable={false}>
+      <PressLip
+        onPress={press}
+        accessibilityLabel={`${course.title}, ${locked ? accessLine(course) : state === "done" ? "completed" : state === "new" ? "not started" : `${done} of ${total} chapters`}`}
+        lip={big ? ui.primary : ui.surfaceEdge}
+        lipSize={big ? 5 : 4}
+        radius={big ? 20 : 18}
+        border
+        haptics
+        faceStyle={[styles.face, big ? styles.faceBig : styles.faceSmall]}
+      >
+        <View style={{ width: ring.size, height: ring.size }}>
+          <CourseRing progress={locked ? 0 : value} size={ring.size} stroke={5} />
+          <CourseIcon course={course} size={ring.icon} radius={ring.radius} style={[styles.icon, { left: (ring.size - ring.icon) / 2, top: (ring.size - ring.icon) / 2 }]} />
+          {state === "done" && !locked ? (
+            <View style={styles.badge} importantForAccessibility="no-hide-descendants">
+              <Svg width={12} height={12} viewBox="0 0 24 24" fill="none">
+                <Path d="M20 6 9 17l-5-5" stroke="#FFFFFF" strokeWidth={4} strokeLinecap="round" strokeLinejoin="round" />
+              </Svg>
+            </View>
+          ) : null}
+        </View>
 
-        {finished && !locked ? (
-          <View style={styles.badge} importantForAccessibility="no-hide-descendants">
-            <Svg width={13} height={13} viewBox="0 0 24 24" fill="none">
-              <Path d="M20 6 9 17l-5-5" stroke="#FFFFFF" strokeWidth={4} strokeLinecap="round" strokeLinejoin="round" />
-            </Svg>
-          </View>
-        ) : null}
-
-        <AppText numberOfLines={1} style={styles.name}>
-          {course.title}
-        </AppText>
-        <AppText numberOfLines={1} style={[styles.sub, finished && !locked && styles.subDone]}>
-          {sub}
-        </AppText>
+        <View style={styles.words}>
+          <AppText numberOfLines={2} style={big ? styles.nameBig : styles.name}>
+            {course.title}
+          </AppText>
+          <AppText numberOfLines={1} style={[styles.sub, state === "done" && !locked && styles.subDone]}>
+            {sub}
+          </AppText>
+          {big ? (
+            <ProgressBar
+              value={locked ? 0 : value}
+              height={12}
+              radius={7}
+              fill={ui.fill}
+              track={ui.track}
+              stripe={{ color: ui.fillTop, height: 4 }}
+              inset={{ color: ui.trackInset, height: 2 }}
+              intro={fillAt ? { delay: fillAt.delay, duration: 800 } : undefined}
+              curve={CURVE.fill}
+              style={styles.bar}
+            />
+          ) : null}
+        </View>
 
         <View style={styles.chevron} importantForAccessibility="no-hide-descendants">
           {locked ? (
-            <Ionicons name="lock-closed" size={18} color={CHEVRON} />
+            <Ionicons name="lock-closed" size={18} color={ui.textMuted} />
           ) : (
             <Svg width={22} height={22} viewBox="0 0 24 24" fill="none">
-              <Path d="m9 6 6 6-6 6" stroke={CHEVRON} strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" />
+              <Path d="m9 6 6 6-6 6" stroke={big ? ui.primary : ui.textMuted} strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" />
             </Svg>
           )}
         </View>
-      </Animated.View>
-    </Pressable>
+      </PressLip>
+    </View>
   );
 }
 
-const CHEVRON = "#9AA39E";
+// the icon at 64 (started) or 56 dp with its ring, the tile inside it
+const RING_BIG = { size: 64, icon: 50, radius: 14 };
+const RING_SMALL = { size: 56, icon: 42, radius: 12 };
 
 const styles = StyleSheet.create({
-  row: { height: COURSE_ROW, borderRadius: 24, backgroundColor: "#FFFFFF" },
-  ring: { position: "absolute", left: 6, top: 6 },
-  icon: { position: "absolute", left: 20, top: 20 },
+  face: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 14,
+    backgroundColor: ui.surface,
+  },
+
+  faceBig: {
+    padding: 14,
+  },
+
+  faceSmall: {
+    padding: 12,
+  },
+
+  icon: {
+    position: "absolute",
+  },
+
   badge: {
     position: "absolute",
-    left: 68,
-    top: 66,
+    left: 34,
+    top: 34,
     width: 26,
     height: 26,
     borderRadius: 13,
     borderWidth: 3,
-    borderColor: "#FFFFFF",
-    backgroundColor: "#5E9C7D",
+    borderColor: ui.surface,
+    backgroundColor: ui.primary,
     alignItems: "center",
     justifyContent: "center",
   },
+
+  words: {
+    flex: 1,
+  },
+
+  nameBig: {
+    fontFamily: fonts.display,
+    fontSize: 17,
+    lineHeight: 22,
+    letterSpacing: -0.2,
+    color: ui.ink,
+  },
+
   name: {
-    position: "absolute",
-    left: NAME_LEFT,
-    right: 44,
-    top: 22,
-    fontSize: 22,
-    lineHeight: 28,
-    letterSpacing: -0.44,
-    fontFamily: "PlusJakartaSans_800ExtraBold",
+    fontFamily: fonts.display,
+    fontSize: 16,
+    lineHeight: 21,
+    letterSpacing: -0.2,
+    color: ui.ink,
   },
+
   sub: {
-    position: "absolute",
-    left: NAME_LEFT,
-    right: 44,
-    top: 54,
-    fontSize: 14,
-    lineHeight: 20,
-    fontFamily: "PlusJakartaSans_700Bold",
-    color: "#5F6663",
+    marginTop: 2,
+    fontFamily: fonts.semibold,
+    fontSize: 13,
+    lineHeight: 18,
+    color: ui.textSecondary,
   },
-  subDone: { color: "#3F7359" },
-  chevron: { position: "absolute", right: 14, top: 37, width: 22, height: 22, alignItems: "center", justifyContent: "center" },
+
+  subDone: {
+    color: ui.done.ink,
+  },
+
+  bar: {
+    marginTop: 10,
+  },
+
+  chevron: {
+    width: 22,
+    height: 22,
+    alignItems: "center",
+    justifyContent: "center",
+  },
 });

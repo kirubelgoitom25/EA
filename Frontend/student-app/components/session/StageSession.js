@@ -1,13 +1,16 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  Animated,
   KeyboardAvoidingView,
   Platform,
   Pressable,
   ScrollView,
   StyleSheet,
   View,
+  useWindowDimensions,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { LinearGradient } from "expo-linear-gradient";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import {
@@ -19,19 +22,23 @@ import {
   submitChapter,
 } from "../../services/chapterProgress";
 import { feedback, haptic } from "../../services/feedback";
-import { layout, level, space, tokens } from "../../theme";
+import { layout, level, space, tokens, ui } from "../../theme";
 import AppText from "../ui/AppText";
 import Button from "../ui/Button";
 import Fox from "../ui/Fox";
 import { useFoxReact } from "../ui/FoxContext";
 import EmptyState from "../ui/EmptyState";
+import { CURVE, MOTION, useReducedMotion } from "../ui/motion";
+import ProgressBar from "../ui/ProgressBar";
+import { LightScenery } from "../ui/Scenery";
 import { Pulse, QuestionSkeleton } from "../ui/Skeleton";
-import FeedbackNote from "./FeedbackNote";
+import FeedbackNote, { VERDICTS } from "./FeedbackNote";
 import QuestionView from "./QuestionView";
 import ResultsView from "./ResultsView";
 import StageResultView from "./StageResultView";
 import {
   allAnswered,
+  bestStreak,
   evaluate,
   isStageDone,
   nextStageIndex,
@@ -49,12 +56,87 @@ import {
 //
 // stageIndex null = "continue": the first stage not done yet.
 // phase: loading | error | empty | question | submitting | submitError | stageResult | final
-export default function StageSession({
+//
+// The session slides up from the bottom when it opens (420 ms) and back down when it is closed with ✕
+// (300 ms, ease-in); leaving from a result fades it instead (280 ms). Leaving starts the move on the
+// native driver and switches screens on the next frame, so the next screen builds while this one is
+// still moving and there is never a blank frame. Reduce Motion: a 150 ms fade.
+export default function StageSession(props) {
+  const reduce = useReducedMotion();
+  const { height } = useWindowDimensions();
+  const place = useRef(new Animated.Value(0)).current; // 0 below the screen (or invisible), 1 in place
+  const fade = useRef(new Animated.Value(1)).current;
+  const left = useRef(false);
+
+  useEffect(() => {
+    const run = Animated.timing(place, {
+      toValue: 1,
+      duration: reduce ? MOTION.fade : 420,
+      easing: CURVE.screen,
+      useNativeDriver: true,
+    });
+    run.start();
+    return () => run.stop();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const leave = (how, then) => {
+    if (left.current) return;
+    left.current = true;
+    if (how === "down" && !reduce) {
+      Animated.timing(place, { toValue: 0.4, duration: 300, easing: CURVE.exit, useNativeDriver: true }).start();
+    } else {
+      Animated.timing(fade, { toValue: 0.3, duration: reduce ? MOTION.fade : 280, easing: CURVE.exit, useNativeDriver: true }).start();
+    }
+    requestAnimationFrame(() => then?.());
+  };
+  // a result's buttons open another stage or chapter: those may run again later in this session
+  const alive = useRef(true);
+  useEffect(() => () => {
+    alive.current = false;
+  }, []);
+  const fadeThen = (fn) => (...args) => {
+    leave("fade", () => {
+      left.current = false;
+      fn?.(...args);
+      // still here (the same stage was asked for again): come back into view
+      setTimeout(() => {
+        if (alive.current) Animated.timing(fade, { toValue: 1, duration: MOTION.fade, useNativeDriver: true }).start();
+      }, 320);
+    });
+  };
+
+  const look = useMemo(
+    () => ({
+      flex: 1,
+      opacity: reduce ? Animated.multiply(place, fade) : fade,
+      transform: [{ translateY: reduce ? 0 : place.interpolate({ inputRange: [0, 1], outputRange: [height, 0] }) }],
+    }),
+    [place, fade, reduce, height],
+  );
+
+  return (
+    <View style={styles.under}>
+      <Animated.View style={look}>
+        <StageBody
+          {...props}
+          onExit={() => leave("down", props.onExit)}
+          onExitFade={() => leave("fade", props.onExit)}
+          onOpenStage={fadeThen(props.onOpenStage)}
+          onNextChapter={fadeThen(props.onNextChapter)}
+        />
+      </Animated.View>
+    </View>
+  );
+}
+
+function StageBody({
   userId,
   lesson,
   stageIndex: requestedStage,
   hasNextChapter,
   onExit,
+  onExitFade,
   onOpenStage,
   onNextChapter,
   onComplete,
@@ -70,7 +152,9 @@ export default function StageSession({
   const [index, setIndex] = useState(0);
   const [answers, setAnswers] = useState({}); // this stage
   const [answered, setAnswered] = useState(false);
+  const [selected, setSelected] = useState(undefined); // the picked option, before Check
   const [draft, setDraft] = useState("");
+  const [dragging, setDragging] = useState(false); // a word is held: the page doesn't scroll meanwhile
   const [submitState, setSubmitState] = useState({ results: {}, total: null });
   const mounted = useRef(true);
   const scrollRef = useRef(null);
@@ -85,6 +169,7 @@ export default function StageSession({
     setIndex(0);
     setAnswers({});
     setAnswered(false);
+    setSelected(undefined);
     setDraft("");
 
     Promise.all([loadChapterQuestions(lesson.id), loadProgress(userId, lesson.id)])
@@ -169,8 +254,15 @@ export default function StageSession({
     }
   };
 
-  const choose = (optionIndex) => {
+  // A tap picks an answer (it can be changed); Check commits it and shows the verdict.
+  const select = (optionIndex) => {
     if (answered) return;
+    setSelected(optionIndex);
+  };
+
+  const check = () => {
+    if (answered || selected === undefined || selected === null) return;
+    const optionIndex = selected;
     setAnswers((current) => ({ ...current, [question.key]: optionIndex }));
     setAnswered(true);
     const result = evaluate(question, optionIndex);
@@ -192,15 +284,45 @@ export default function StageSession({
     haptic.light();
   };
 
+  // Question to question: the content slides 70 dp left and fades (220 ms), the next one comes in from
+  // 70 dp right (380 ms) and its pieces rise in turn. The bar, the header and the button stay put.
+  const reduce = useReducedMotion();
+  const slide = useRef(new Animated.Value(0)).current;
+  const moving = useRef(false);
   const goNext = () => {
+    if (moving.current) return;
     if (isLast) {
       finishStage();
       return;
     }
-    setIndex((current) => current + 1);
-    setAnswered(false);
-    setDraft("");
+    const advance = () => {
+      setIndex((current) => current + 1);
+      setAnswered(false);
+      setSelected(undefined);
+      setDraft("");
+    };
+    moving.current = true;
+    const out = reduce
+      ? Animated.timing(slide, { toValue: -1, duration: MOTION.fade, useNativeDriver: true })
+      : Animated.timing(slide, { toValue: -1, duration: 220, easing: CURVE.exit, useNativeDriver: true });
+    out.start(() => {
+      slide.setValue(1);
+      advance();
+      const back = reduce
+        ? Animated.timing(slide, { toValue: 0, duration: MOTION.fade, useNativeDriver: true })
+        : Animated.timing(slide, { toValue: 0, duration: 380, easing: CURVE.screen, useNativeDriver: true });
+      back.start(() => {
+        moving.current = false;
+      });
+    });
   };
+  const slideLook = useMemo(
+    () => ({
+      opacity: slide.interpolate({ inputRange: [-1, 0, 1], outputRange: [0, 1, 0] }),
+      transform: [{ translateX: reduce ? 0 : slide.interpolate({ inputRange: [-1, 0, 1], outputRange: [-70, 0, 70] }) }],
+    }),
+    [slide, reduce],
+  );
 
   // Fill-in (and any question without an answer key) is only saved here.
   const feedbackNote =
@@ -218,7 +340,7 @@ export default function StageSession({
         hasNext={hasNextChapter}
         onNext={onNextChapter}
         onRetry={() => onOpenStage(0)}
-        onBackToCourse={onExit}
+        onBackToCourse={onExitFade}
         backLabel="Back to chapter"
       />
     );
@@ -231,12 +353,13 @@ export default function StageSession({
       <StageResultView
         stageNumber={stageIndex + 1}
         summary={stageSummary(stage, merged)}
+        streak={bestStreak(stageQuestions, merged)}
         statuses={statuses}
         review={wrongChoices(stageQuestions, answers)}
         nextStageNumber={next ? next.index + 1 : null}
         onNextStage={() => next && onOpenStage(next.index)}
         onRetry={() => setRunId((n) => n + 1)}
-        onBackToChapter={onExit}
+        onBackToChapter={onExitFade}
       />
     );
   }
@@ -245,6 +368,7 @@ export default function StageSession({
   if (phase === "loading") {
     return (
       <View style={[styles.screen, { paddingTop: insets.top }]}>
+        <Ground />
         <TopBar onExit={onExit} />
         <View style={styles.content}>
           <QuestionSkeleton />
@@ -256,6 +380,7 @@ export default function StageSession({
   if (phase !== "question") {
     return (
       <View style={[styles.screen, { paddingTop: insets.top }]}>
+        <Ground />
         <TopBar onExit={onExit} />
         <View style={styles.centerFill}>
           {phase === "submitting" ? (
@@ -304,6 +429,7 @@ export default function StageSession({
       style={[styles.screen, { paddingTop: insets.top }]}
       behavior={Platform.OS === "ios" ? "padding" : undefined}
     >
+      <Ground />
       <TopBar onExit={onExit} total={stageQuestions.length} current={index} answered={answered} />
 
       <ScrollView
@@ -312,18 +438,25 @@ export default function StageSession({
         contentContainerStyle={styles.content}
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
+        scrollEnabled={!dragging}
       >
-        <QuestionView
-          key={question.key}
-          question={question}
-          stageNumber={stageIndex + 1}
-          answer={isFill && !answered ? draft : answer}
-          answered={answered}
-          onChoose={choose}
-          onType={setDraft}
-          onSubmitText={checkText}
-        />
+        <Animated.View style={slideLook}>
+          <QuestionView
+            key={question.key}
+            question={question}
+            stageNumber={stageIndex + 1}
+            selected={selected}
+            answer={isFill && !answered ? draft : answer}
+            answered={answered}
+            onSelect={select}
+            onType={setDraft}
+            onSubmitText={checkText}
+            onDragging={setDragging}
+          />
+        </Animated.View>
+      </ScrollView>
 
+      <Footer verdict={answered ? verdict : null} bottom={space.lg + insets.bottom}>
         {answered ? (
           <FeedbackNote
             key={`${question.key}-note`}
@@ -332,27 +465,21 @@ export default function StageSession({
             explanation={question.explanation}
           />
         ) : null}
-      </ScrollView>
-
-      <View style={[styles.footer, { paddingBottom: space.lg + insets.bottom }]}>
         {answered ? (
-          <Button label={isLast ? "Finish stage" : "Continue"} onPress={goNext} />
+          <Button label={isLast ? "Finish stage" : "Continue"} tone={verdict === "wrong" ? "wrong" : undefined} onPress={goNext} />
         ) : isFill ? (
           <Button label="Check" onPress={checkText} disabled={!draft.trim()} />
         ) : (
-          <AppText variant="label" tone="secondary" style={styles.hint}>
-            Tap an answer
-          </AppText>
+          <Button label="Check" onPress={check} disabled={selected === undefined || selected === null} />
         )}
-      </View>
+      </Footer>
     </KeyboardAvoidingView>
   );
 }
 
-// ✕ to leave, then one segment per question of the stage. Answered
-// segments are filled along the Tail; the current one is tinted.
+// ✕ to leave, then the stage's progress: one 18 dp bar that fills a step each time a question is
+// checked (with the fill motion's little overshoot).
 function TopBar({ onExit, total, current, answered }) {
-  const segments = total ? Array.from({ length: total }, (_, i) => i) : [];
   const done = current + (answered ? 1 : 0);
 
   return (
@@ -367,29 +494,19 @@ function TopBar({ onExit, total, current, answered }) {
         <Ionicons name="close" size={26} color={tokens.textSecondary} />
       </Pressable>
       {total ? (
-        <View
-          style={styles.segments}
-          accessible
-          accessibilityRole="progressbar"
+        <ProgressBar
+          value={done / total}
+          height={18}
+          radius={10}
+          track={ui.track}
+          inset={{ color: ui.trackInset, height: 2 }}
+          fill={ui.fill}
+          stripe={{ color: ui.fillTop, height: 5 }}
+          change={{ duration: MOTION.fill }}
+          curve={CURVE.fill}
+          style={styles.flex}
           accessibilityLabel={`Question ${current + 1} of ${total}`}
-        >
-          {segments.map((i) => (
-            <View
-              key={i}
-              style={[
-                styles.segment,
-                {
-                  backgroundColor:
-                    i < done
-                      ? level.segmentDone
-                      : i === current
-                        ? level.segmentNow
-                        : level.segmentAhead,
-                },
-              ]}
-            />
-          ))}
-        </View>
+        />
       ) : null}
       {/* the small companion: she reacts to each answer and keeps quiet otherwise */}
       {total ? <Fox pose="head" size={42} reactive tappable caption bubble="below" /> : null}
@@ -397,10 +514,57 @@ function TopBar({ onExit, total, current, answered }) {
   );
 }
 
+// The soft green-blue lesson ground, behind everything else on the screen, with low hills and a pine
+// along the bottom.
+function Ground() {
+  const { width } = useWindowDimensions();
+  return (
+    <View pointerEvents="none" style={StyleSheet.absoluteFill}>
+      <LinearGradient colors={level.lessonGradient} style={StyleSheet.absoluteFill} />
+      <LightScenery width={width} />
+    </View>
+  );
+}
+
+// The button area. Once a question is checked it fades (250 ms) to the feedback sheet's colour, with
+// rounded top corners and a 2 dp border, so the sheet rising into it and the button read as one panel.
+function Footer({ verdict, bottom, children }) {
+  const tint = useRef(new Animated.Value(verdict ? 1 : 0)).current;
+  const shown = useRef(verdict);
+  if (verdict) shown.current = verdict;
+  const look = (VERDICTS[shown.current] ?? VERDICTS.saved).sheet;
+  useEffect(() => {
+    const run = Animated.timing(tint, { toValue: verdict ? 1 : 0, duration: verdict ? 250 : 120, useNativeDriver: false });
+    run.start();
+    return () => run.stop();
+  }, [verdict, tint]);
+  return (
+    <Animated.View
+      style={[
+        styles.footer,
+        {
+          paddingBottom: bottom,
+          paddingTop: verdict ? 18 : space.md,
+          backgroundColor: tint.interpolate({ inputRange: [0, 1], outputRange: ["rgba(255,255,255,0)", look.bg] }),
+          borderColor: tint.interpolate({ inputRange: [0, 1], outputRange: ["rgba(255,255,255,0)", look.border] }),
+        },
+      ]}
+    >
+      {children}
+    </Animated.View>
+  );
+}
+
+
 const styles = StyleSheet.create({
+  // under the sliding session: the path's sky, so a moving session never shows a blank screen
+  under: {
+    flex: 1,
+    backgroundColor: ui.sky,
+  },
+
   screen: {
     flex: 1,
-    backgroundColor: level.lessonBg,
   },
 
   flex: {
@@ -415,22 +579,6 @@ const styles = StyleSheet.create({
     paddingVertical: space.md,
   },
 
-  segments: {
-    flex: 1,
-    flexDirection: "row",
-    gap: 4,
-  },
-
-  segment: {
-    flex: 1,
-    height: 8,
-    borderRadius: 4,
-  },
-
-  hint: {
-    textAlign: "center",
-    paddingVertical: space.lg,
-  },
 
   content: {
     paddingHorizontal: layout.gutter,
@@ -440,8 +588,11 @@ const styles = StyleSheet.create({
 
   footer: {
     paddingHorizontal: layout.gutter,
-    paddingTop: space.md,
-    backgroundColor: level.lessonBg,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    borderWidth: 2,
+    borderBottomWidth: 0,
+    marginHorizontal: -2, // the side borders sit just off screen; only the top edge and corners show
   },
 
   centerFill: {

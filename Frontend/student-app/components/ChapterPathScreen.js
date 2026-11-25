@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Animated, BackHandler, Easing, Pressable, ScrollView, StyleSheet, View } from "react-native";
+import { Animated, BackHandler, Easing, ScrollView, StyleSheet, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -13,7 +13,7 @@ import {
 import { fetchLessonActivities } from "../services/api";
 import { buildSteps, hasOwnSteps, nextStepAfter } from "../services/activitySteps";
 import { feedback } from "../services/feedback";
-import { layout, level, levelLabel, space, stone, tokens } from "../theme";
+import { edge, fonts, layout, space, tokens, ui } from "../theme";
 import { validAnswers } from "./session/sessionModel";
 import AppText from "./ui/AppText";
 import Button from "./ui/Button";
@@ -22,10 +22,11 @@ import { useFoxReact } from "./ui/FoxContext";
 import ProgressBar from "./ui/ProgressBar";
 import { ADVANCE, SCREEN } from "./ui/pathMotionModel";
 import { handOff, takeHandoff } from "./ui/handoff";
-import { useReducedMotion } from "./ui/motion";
+import { CURVE, useReducedMotion } from "./ui/motion";
+import PressLip, { EdgeBox } from "./ui/PressLip";
+import StatChips from "./ui/StatChips";
 import { win } from "./ui/StepMorph";
 import DotGrid from "./ui/DotGrid";
-import Emblem from "./ui/Emblem";
 import Route from "./ui/Route";
 import { chapterPath } from "./chapterPathModel";
 import { PathSkeleton } from "./ui/Skeleton";
@@ -37,7 +38,12 @@ import StatusBarScrim, { scrimOnScroll } from "./ui/StatusBarScrim";
 // to come. The chapter's score and XP are saved once every question stage is done.
 // The header panel's height below the status bar: back button, "CHAPTER 3", a two-line title and
 // the progress bar (the level-2 reference: 206 on a 390 x 844 screen).
-export const PANEL_HEIGHT = 178;
+// From the safe area's top to where the path (and its scenery) starts: the fixed top bar (72), 4 dp,
+// the header card (104 + its 6 dp edge), less the 14 dp of scenery the card overlaps. Fixed, so the
+// course page's travelling tile knows where the current lesson will be.
+const TOP_BAR = 14 + 48 + 10;
+const CARD = 104;
+export const PANEL_HEIGHT = TOP_BAR + 4 + CARD + edge.banner.depth - 14;
 
 // the bar fills in step with the path's advance
 const BAR_CHANGE = { delay: ADVANCE.lead + ADVANCE.bar[0], duration: ADVANCE.bar[1] - ADVANCE.bar[0] };
@@ -84,6 +90,9 @@ export const cachedChapter = (userId, lessonId) => lastLoaded.get(cacheKey(userI
 
 export default function ChapterPathScreen({
   userId,
+  student,
+  ranking,
+  onRanking,
   course,
   chapterNumber,
   chapterCount,
@@ -259,40 +268,46 @@ export default function ChapterPathScreen({
       >
         <DotGrid />
 
-        {/* the header on its pale green panel; always the same height, so the path below starts
-            at the same place whatever the title's length (the chapter-to-lessons move relies on it) */}
-        <View style={[styles.panel, { height: insets.top + PANEL_HEIGHT }]}>
-          <Animated.View pointerEvents="none" style={[styles.panelGround, entryLooks?.panel]} />
-          <View style={styles.titleRow}>
-            <Emblem course={course} size={48} radius={13} style={styles.emblem} />
-            <Animated.View
-              style={[
-                styles.titleText,
-                entryLooks?.title,
-              ]}
-            >
-              <AppText style={levelLabel}>{chapterNumber ? `CHAPTER ${chapterNumber}` : "CHAPTER"}</AppText>
-              <AppText variant="title" numberOfLines={2} style={styles.title}>
-                {lesson.title}
-              </AppText>
-              <ProgressBar
-                value={loaded && items.length ? doneCount / items.length : 0}
-                height={5}
-                fill={level.barFill}
-                track={level.barTrack}
-                change={BAR_CHANGE}
-                intro={entry ? SCREEN.enter.bar : undefined}
-                style={styles.statusBar}
-                accessibilityLabel={loaded && items.length ? `${doneCount} of ${items.length} ${items.length === 1 ? "step" : "steps"} done` : "Loading progress"}
-              />
-            </Animated.View>
-          </View>
+        {/* the header card, always the same height, so the path below starts at the same place whatever
+            the title's length (the course page's travelling tile relies on it); it overlaps the top 14 dp
+            of the scenery */}
+        <View style={[styles.panel, { height: insets.top + PANEL_HEIGHT + 14 }]}>
+          <Animated.View style={entryLooks?.panel}>
+            <EdgeBox lip={ui.surfaceEdge} lipSize={edge.banner.depth} radius={edge.banner.radius} border faceStyle={styles.card}>
+              <EdgeBox lip="#A82566" lipSize={4} radius={15} highlight="#EE78AE" faceStyle={styles.bookTile}>
+                <Ionicons name="book" size={24} color="#FFFFFF" />
+              </EdgeBox>
+              <Animated.View style={[styles.cardWords, entryLooks?.title]}>
+                <AppText style={styles.kicker} numberOfLines={1}>
+                  {saved
+                    ? saved.toUpperCase()
+                    : [
+                        chapterNumber ? `CHAPTER ${chapterNumber}` : "CHAPTER",
+                        loaded && items.length ? (nextAt >= 0 ? `LESSON ${nextAt + 1} OF ${items.length}` : `${items.length} OF ${items.length} DONE`) : null,
+                      ]
+                        .filter(Boolean)
+                        .join(" · ")}
+                </AppText>
+                <AppText numberOfLines={2} style={styles.title}>
+                  {lesson.title}
+                </AppText>
+                <ProgressBar
+                  value={loaded && items.length ? doneCount / items.length : 0}
+                  height={10}
+                  radius={6}
+                  fill={ui.fill}
+                  track={ui.track}
+                  stripe={{ color: ui.fillTop, height: 3 }}
+                  curve={CURVE.fill}
+                  change={BAR_CHANGE}
+                  intro={entry ? SCREEN.enter.bar : undefined}
+                  style={styles.statusBar}
+                  accessibilityLabel={loaded && items.length ? `${doneCount} of ${items.length} ${items.length === 1 ? "lesson" : "lessons"} done` : "Loading progress"}
+                />
+              </Animated.View>
+            </EdgeBox>
+          </Animated.View>
         </View>
-        {saved ? (
-          <AppText variant="label" tone="accent" style={styles.saved}>
-            {saved}
-          </AppText>
-        ) : null}
 
         {state.phase === "loading" ? <PathSkeleton count={4} style={styles.loading} /> : null}
         {state.phase === "empty" || state.phase === "error" ? (
@@ -313,26 +328,36 @@ export default function ChapterPathScreen({
         {loaded && items.length ? (
           <Route
             style={styles.route}
+            scenery
+            trail="chapter"
             foxKey={`chapter-${lesson.id}`}
             onPress={(i) => openItem(items[i])}
             items={routeItems}
-            den={{ course, ...den }}
+            den={{ course, eyebrow: "CHAPTER END", ...den }}
             entry={entry}
           />
         ) : null}
       </ScrollView>
 
-      <StatusBarScrim visible={scrolled} color={stone.bg} />
+      <StatusBarScrim visible={scrolled} color={ui.screen} />
 
-      <Pressable
-        onPress={goBack}
-        hitSlop={space.sm}
-        accessibilityRole="button"
-        accessibilityLabel={`Back to ${course?.title ?? "course"}`}
-        style={({ pressed }) => [styles.back, { top: insets.top + space.sm, backgroundColor: scrolled ? tokens.surface : entry ? "transparent" : level.panel }, pressed && styles.pressed]}
-      >
-        <Ionicons name="chevron-back" size={22} color={tokens.text} />
-      </Pressable>
+      {/* the top bar, fixed: back to the course, and the stat chips */}
+      <View style={[styles.topBar, { top: insets.top, backgroundColor: scrolled ? ui.screen : "transparent" }]} pointerEvents="box-none">
+        <PressLip
+          onPress={goBack}
+          hitSlop={space.sm}
+          accessibilityLabel={`Back to ${course?.title ?? "course"}`}
+          lip={ui.surfaceEdge}
+          lipSize={edge.topButton.depth}
+          radius={edge.topButton.radius}
+          border
+          haptics
+          faceStyle={styles.backFace}
+        >
+          <Ionicons name="chevron-back" size={22} color={tokens.text} />
+        </PressLip>
+        {student ? <StatChips user={student} ranking={ranking} onRanking={onRanking} /> : null}
+      </View>
 
       {footerButton ? (
         <View style={[styles.footer, { paddingBottom: space.lg + insets.bottom }]}>{footerButton}</View>
@@ -345,50 +370,57 @@ export default function ChapterPathScreen({
 const styles = StyleSheet.create({
   root: {
     flex: 1,
-    backgroundColor: stone.bg,
+    backgroundColor: ui.screen,
   },
 
-  // The words sit at the panel's bottom: a one-line title leaves the room above it, not below.
+  // The card sits at the panel's bottom; the route starts 14 dp above its bottom edge.
   panel: {
-    paddingHorizontal: layout.gutter,
-    paddingBottom: 31,
+    paddingHorizontal: 16,
     justifyContent: "flex-end",
+    zIndex: 2,
+    elevation: 2,
   },
 
-  panelGround: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: level.panel,
-    borderBottomLeftRadius: level.panelRadius,
-    borderBottomRightRadius: level.panelRadius,
-  },
-
-  titleRow: {
+  // the white header card: the pink book tile, then the words and the bar
+  card: {
+    height: CARD,
+    padding: 14,
     flexDirection: "row",
-    alignItems: "flex-start",
-    gap: space.md + 1,
+    alignItems: "center",
+    gap: 14,
+    backgroundColor: ui.surface,
   },
 
-  emblem: {
-    marginTop: 4,
+  bookTile: {
+    width: 50,
+    height: 50,
+    backgroundColor: "#E0408A",
+    alignItems: "center",
+    justifyContent: "center",
   },
 
-  titleText: {
+  cardWords: {
     flex: 1,
   },
 
+  kicker: {
+    fontFamily: fonts.display,
+    fontSize: 11,
+    lineHeight: 14,
+    letterSpacing: 1.1,
+    color: ui.primary,
+  },
+
   title: {
-    fontSize: 19,
-    lineHeight: 24,
+    fontFamily: fonts.display,
+    fontSize: 15,
+    lineHeight: 20,
+    color: tokens.text,
     marginTop: 2,
   },
 
   statusBar: {
-    marginTop: space.lg,
-  },
-
-  saved: {
-    marginTop: space.md,
-    paddingHorizontal: layout.gutter,
+    marginTop: 8,
   },
 
   loading: {
@@ -399,13 +431,22 @@ const styles = StyleSheet.create({
     paddingHorizontal: layout.gutter,
   },
 
-  back: {
+  topBar: {
     position: "absolute",
-    left: 20,
+    left: 0,
+    right: 0,
+    height: TOP_BAR,
+    paddingTop: 14,
+    paddingHorizontal: 16,
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+  },
+
+  backFace: {
     width: 44,
     height: 44,
-    borderRadius: 22,
-    backgroundColor: tokens.surface,
+    backgroundColor: ui.surface,
     alignItems: "center",
     justifyContent: "center",
   },
@@ -415,8 +456,9 @@ const styles = StyleSheet.create({
   },
 
   route: {
-    marginTop: space.xl,
+    marginTop: -14,
     marginHorizontal: layout.gutter,
+    zIndex: 1,
   },
 
   footer: {

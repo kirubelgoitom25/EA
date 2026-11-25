@@ -1,5 +1,6 @@
 import React from "react";
 import { Animated, ScrollView, StyleSheet, View } from "react-native";
+import { LinearGradient } from "expo-linear-gradient";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { layout, space, tokens } from "../../theme";
@@ -20,6 +21,10 @@ export const TAB_BAR_HEIGHT = NAV_BAR_HEIGHT + NAV_BAR_MARGIN;
 // - footer: rendered pinned at the bottom, above the tab bar if there is one
 // - withTabBar: leave room for <BottomNavBar>
 // - grid: the neutral path-screen ground: stone background with the dot grid across the whole scroll
+// - scrollRef / scrollProps: handed to the ScrollView (a screen that tracks or sets its own scroll)
+// - backdrop: drawn over the background and under everything else (artwork pinned to the bottom)
+// - underStatusBar: no top safe-area padding; the content starts at the very top (a header panel that
+//   runs up behind the status bar keeps its own content clear of it)
 export default function Screen({
   children,
   scroll = true,
@@ -28,8 +33,12 @@ export default function Screen({
   refreshControl,
   contentStyle,
   grid = false,
-  background,
+  background, // a colour, or [top, bottom] for a vertical gradient
   pulsing = false, // refreshing: the content fades softly between 60% and 100% (still tappable)
+  scrollRef,
+  scrollProps,
+  backdrop,
+  underStatusBar = false,
 }) {
   const pulse = usePulse(pulsing);
   const insets = useSafeAreaInsets();
@@ -37,6 +46,8 @@ export default function Screen({
 
   const content = scroll ? (
     <ScrollView
+      {...scrollProps}
+      ref={scrollRef}
       style={styles.flex}
       contentContainerStyle={[
         styles.content,
@@ -56,14 +67,19 @@ export default function Screen({
     <View style={[styles.flex, styles.content, contentStyle]}>{children}</View>
   );
 
+  const gradient = Array.isArray(background) ? background : null;
+  const solid = gradient ? null : background;
+
   return (
-    <View style={[styles.screen, { paddingTop: insets.top }, background && { backgroundColor: background }]}>
+    <View style={[styles.screen, { paddingTop: underStatusBar ? 0 : insets.top }, solid && { backgroundColor: solid }]}>
+      {gradient ? <LinearGradient colors={gradient} style={StyleSheet.absoluteFill} /> : null}
+      {backdrop}
       {content}
       {footer ? (
         <View
           style={[
             styles.footer,
-            background && { backgroundColor: background },
+            gradient ? styles.clear : solid && { backgroundColor: solid },
             { paddingBottom: space.lg + bottomSpace },
           ]}
         >
@@ -82,6 +98,10 @@ const styles = StyleSheet.create({
 
   flex: {
     flex: 1,
+  },
+
+  clear: {
+    backgroundColor: "transparent",
   },
 
   fill: {

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { SWAY, ZIG, bezierPoint, layoutPath, pathD, pathLength, pathPoints, pointAt, segment, travelled, wordsSide, xOf } from "../components/ui/pathModel.js";
+import { ROAD, SWAY, bezierPoint, roadBox, roadDots, zigX, layoutPath, pathD, pathLength, pathPoints, pointAt, segment, travelled, wordsSide, xOf } from "../components/ui/pathModel.js";
 
 const item = (status, extra = {}) => ({ status, ...extra });
 const items = (...statuses) => statuses.map((status) => item(status));
@@ -91,22 +91,36 @@ test("the travelled path ends where you stand", () => {
   assert.equal(travelled(items("done", "next", "done"), den), 1);
 });
 
-test("the zigzag puts odd chapters left and even ones right, at 96 and 284 on a 390 screen", () => {
-  const steps = [2, 3, 4, 5, 6].map((number, i) => item(i < 2 ? "done" : i === 2 ? "next" : "todo", { number }));
+test("the trail zig-zags through 96, 270, 150, 280 and again on a 390 screen (path fixes, section 2)", () => {
+  const steps = [1, 2, 3, 4, 5, 6].map((number, i) => item(i < 2 ? "done" : i === 2 ? "next" : "todo", { number }));
   // a 342 wide path centred on a 390 wide screen (24 dp gutters)
   const { points } = pathPoints(steps, false, 342, false, true, { frame: 390 });
-  assert.deepEqual(points.map((p) => Math.round(p.x + 24)), [284, 96, 284, 96, 284]);
+  assert.deepEqual(points.map((p) => Math.round(p.x + 24)), [96, 270, 150, 280, 96, 270]);
   // scaled on a wider screen
   const wide = pathPoints(steps, false, 732, false, true, { frame: 780 });
-  assert.deepEqual(wide.points.slice(0, 2).map((p) => Math.round(p.x + 24)), [568, 192]);
+  assert.deepEqual(wide.points.slice(0, 2).map((p) => Math.round(p.x + 24)), [192, 540]);
 });
 
-test("the zigzag rows are about 125 apart, a little more around the current chapter", () => {
-  const steps = [2, 3, 4, 5, 6].map((number, i) => item(i < 2 ? "done" : i === 2 ? "next" : "todo", { number }));
-  const { centers } = layoutPath(steps, false, true, true);
-  const gaps = centers.slice(1).map((c, i) => c - centers[i]);
-  assert.deepEqual(gaps, [ZIG.row, ZIG.row + ZIG.aboveNext, ZIG.row + ZIG.belowNext, ZIG.row]);
-  gaps.forEach((g) => assert.ok(g >= 125 && g <= 150));
+test("the course trail matches the reference: tiles at y 74, 174, 306, 434, 544", () => {
+  const steps = ["done", "done", "next", "todo", "todo"].map((status, i) => item(status, { number: i + 14 }));
+  const { centers } = layoutPath(steps, false, false, "course");
+  assert.deepEqual(centers.map(Math.round), [74, 179, 311, 439, 544]);
+  // within 5 dp of the reference's tile centres
+  [74, 174, 306, 434, 544].forEach((ref, i) => assert.ok(Math.abs(centers[i] - ref) <= 5));
+});
+
+test("the chapter trail matches the reference: tiles at y 88, 208, 350, 488, den under them", () => {
+  const steps = ["done", "done", "next", "todo"].map((status) => item(status));
+  const { centers, den } = layoutPath(steps, false, false, "chapter");
+  [88, 208, 350, 488].forEach((ref, i) => assert.ok(Math.abs(centers[i] - ref) <= 5));
+  assert.equal(Math.round(den.top), 604);
+});
+
+test("the trail's rows scale with the screen's width, like the artwork behind them", () => {
+  const steps = ["done", "next", "todo"].map((status) => item(status));
+  const narrow = layoutPath(steps, false, false, "chapter", 390).centers;
+  const wide = layoutPath(steps, false, false, "chapter", 780).centers;
+  wide.forEach((c, i) => assert.equal(Math.round(c), Math.round(narrow[i] * 2)));
 });
 
 test("the zigzag line leaves and enters every chapter straight down, with no kink", () => {
@@ -134,4 +148,54 @@ test("pathLength: a straight drop is as long as the drop, and an S curve is long
   assert.ok(one > Math.hypot(188, 125) && one < 188 + 125);
   assert.ok(Math.abs(pathLength(zig, 0, 2, "s") - 2 * one) < 1e-6, "the two mirrored pieces are the same length");
   assert.equal(pathLength(zig, 1, 1, "s"), 0);
+});
+
+test("every step swings across from the one before it, by at least 120, wrap included", () => {
+  for (let number = 1; number <= 40; number += 1) {
+    const a = zigX(number, 390);
+    const b = zigX(number + 1, 390);
+    assert.ok(Math.abs(b - a) >= 120, `steps ${number} and ${number + 1}`);
+    assert.notEqual(Math.sign(a - 195), Math.sign(b - 195), "the other side of the middle");
+  }
+  // chapter 15 to 16 (the visible case of the old five-spot bug)
+  assert.ok(Math.abs(zigX(16, 390) - zigX(15, 390)) >= 120);
+});
+
+const gaps = (dots) => dots.slice(1).map((d, i) => Math.hypot(d.x - dots[i].x, d.y - dots[i].y));
+
+test("the road is round dots evenly spaced along each stretch, by distance along the curve", () => {
+  const points = [{ x: 96, y: 100 }, { x: 270, y: 206 }];
+  const dots = roadDots(points);
+  // the first dot ROAD.start in, then every ROAD.step along the curve: never more than that apart in a
+  // straight line, and only a little less on the bend
+  assert.ok(Math.abs(Math.hypot(dots[0].x - 96, dots[0].y - 100) - ROAD.start) < 0.1);
+  gaps(dots).forEach((g) => assert.ok(g <= ROAD.step + 1e-6 && g > ROAD.step * 0.97, `gap ${g}`));
+  // the curve is the "s" one, so every dot lies between the two steps and runs downward
+  dots.forEach((d, i) => {
+    assert.ok(d.x >= 96 - 1e-6 && d.x <= 270 + 1e-6);
+    if (i) assert.ok(d.y >= dots[i - 1].y);
+  });
+  assert.ok(dots.every((d) => d.seg === 0));
+});
+
+test("no dot is drawn inside a tile's box (grown 3 all round and 9 below)", () => {
+  const points = [{ x: 96, y: 100 }, { x: 270, y: 206 }, { x: 150, y: 312 }];
+  const boxes = points.map(({ x, y }) => roadBox(x, y, 34, 37, 37));
+  assert.deepEqual(boxes[0], { left: 59, right: 133, top: 60, bottom: 146 });
+  const dots = roadDots(points, boxes);
+  const within = (b, d) => d.x >= b.left && d.x <= b.right && d.y >= b.top && d.y <= b.bottom;
+  dots.forEach((d) => boxes.forEach((b) => assert.ok(!within(b, d))));
+  // both stretches still have their dots, each numbered by its stretch
+  assert.ok(dots.some((d) => d.seg === 0) && dots.some((d) => d.seg === 1));
+  // and the road between the tiles is unchanged: the same dots as with no boxes, minus the hidden ones
+  const all = roadDots(points);
+  assert.equal(all.filter((d) => !boxes.some((b) => within(b, d))).length, dots.length);
+});
+
+test("the road also keeps clear of extra boxes along a stretch (a part's dome)", () => {
+  const points = [{ x: 96, y: 100 }, { x: 270, y: 300 }];
+  const dome = roadBox(183, 200, 24, 19, 17);
+  const dots = roadDots(points, [], [dome]);
+  assert.ok(dots.length < roadDots(points).length);
+  dots.forEach((d) => assert.ok(!(d.x >= dome.left && d.x <= dome.right && d.y >= dome.top && d.y <= dome.bottom)));
 });

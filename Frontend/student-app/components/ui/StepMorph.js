@@ -1,9 +1,8 @@
 import React, { useMemo } from "react";
 import { Animated, View } from "react-native";
 
-import { tokens } from "../../theme";
 import { ADVANCE, easedFrames } from "./pathMotionModel";
-import { Glyph, LIP, ROCKS, rockBox } from "./Rock";
+import { currentKey, Glyph, LIP, ROCKS, rockBox } from "./Rock";
 
 // A step's tile changing during an advance (see pathMotionModel's ADVANCE), drawn in place of its
 // Rock until the advance is over; then the Rock takes over in the very same look. Nothing here is a
@@ -53,19 +52,29 @@ export default function StepMorph({ role, from, to, iconFrom, iconTo, size = 84,
     };
   }, [role, from, clock]);
 
-  const ring = {
-    position: "absolute",
-    left: left - 12 * k,
-    top: top - 12 * k,
-    width: size + 24 * k,
-    height: size + 24 * k,
-    borderRadius: 36 * k,
-    borderWidth: 6 * k,
-    borderColor: tokens.accent,
-    backgroundColor: tokens.surface,
-  };
+  // the current step's key is drawn as Rock draws it (the supplied artwork's layout), the others as tiles
+  const key = currentKey(size);
+  const f = key.face;
+  const ring = { position: "absolute", ...key.ring };
   const tile = (extra) => ({ position: "absolute", left, width: size, height: size, borderRadius: radius, ...extra });
-  const centred = { position: "absolute", left, top, width: size, height: size, alignItems: "center", justifyContent: "center" };
+  const keyClip = (colours) => ({ position: "absolute", left: f.left, top: f.top, width: f.size, height: f.size, borderRadius: f.radius, overflow: "hidden", backgroundColor: colours.lip });
+  const keyFace = (colours) => ({ position: "absolute", left: 0, top: -f.lip, width: f.size, height: f.size, borderRadius: f.radius, backgroundColor: colours.face });
+  const centredOn = (status) =>
+    status === "next"
+      ? { position: "absolute", left: f.left, top: f.top, width: f.size, height: f.size - f.lip, alignItems: "center", justifyContent: "center" }
+      : { position: "absolute", left, top, width: size, height: size, alignItems: "center", justifyContent: "center" };
+  // one look's edge and face, in its own shape; fade: an opacity for the look fading in
+  const look2 = (status, colours, fade) =>
+    status === "next" ? (
+      <Animated.View style={[keyClip(colours), fade && { opacity: fade }]}>
+        <View style={keyFace(colours)} />
+      </Animated.View>
+    ) : (
+      <>
+        <Animated.View style={[tile({ top: top + LIP, backgroundColor: colours.lip }), fade && { opacity: fade }]} />
+        <Animated.View style={[tile({ top, backgroundColor: colours.face }), fade && { opacity: fade }]} />
+      </>
+    );
 
   return (
     <View pointerEvents="none" style={{ width: box.width, height: box.height }}>
@@ -73,14 +82,12 @@ export default function StepMorph({ role, from, to, iconFrom, iconTo, size = 84,
       {look.ringIn ? <Animated.View style={[ring, look.ringIn]} /> : null}
       <Animated.View style={{ position: "absolute", left: 0, top: 0, width: box.width, height: box.height, transform: [{ scale: look.pop }] }}>
         {/* the edge and face of the old look, with the new look fading in over them */}
-        <View style={tile({ top: top + LIP, backgroundColor: a.lip })} />
-        <Animated.View style={[tile({ top: top + LIP, backgroundColor: b.lip }), { opacity: look.newFace }]} />
-        <View style={tile({ top, backgroundColor: a.face })} />
-        <Animated.View style={[tile({ top, backgroundColor: b.face }), { opacity: look.newFace }]} />
-        <Animated.View style={[centred, look.oldIcon]}>
+        {look2(from, a, null)}
+        {look2(to, b, look.newFace)}
+        <Animated.View style={[centredOn(from), look.oldIcon]}>
           <Glyph name={iconFrom} ink={a.ink} k={k} />
         </Animated.View>
-        <Animated.View style={[centred, look.newIcon]}>
+        <Animated.View style={[centredOn(to), look.newIcon]}>
           <Glyph name={iconTo} ink={b.ink} k={k} />
         </Animated.View>
       </Animated.View>

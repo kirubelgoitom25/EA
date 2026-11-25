@@ -10,7 +10,9 @@ import { useReducedMotion } from "./motion";
 // Motion). onPlum = the darker track used on the plum card. fill / track: plain colours instead of
 // the Tail and the usual track (the neutral path screens use moss on stone). intro: { delay, duration }
 // to fill from empty when the bar first appears. change: { delay, duration } for later changes (a path's
-// advance fills its bar in step with the line).
+// advance fills its bar in step with the line). stripe: { color, height } a lighter band along the
+// fill's top; inset: { color, height } a darker band along the inside top of the track; radius: corners
+// (default half the height); curve: the fill's easing (default ease-out).
 export default function ProgressBar({
   value = 0,
   height = 8,
@@ -19,6 +21,10 @@ export default function ProgressBar({
   track,
   intro,
   change,
+  stripe,
+  inset,
+  radius,
+  curve,
   style,
   accessibilityLabel,
 }) {
@@ -38,7 +44,7 @@ export default function ProgressBar({
       toValue: clamped,
       delay,
       duration,
-      easing: Easing.out(Easing.cubic),
+      easing: curve ?? Easing.out(Easing.cubic),
       useNativeDriver: false,
     });
     animation.start();
@@ -49,7 +55,7 @@ export default function ProgressBar({
     <View
       style={[
         styles.track,
-        { height, borderRadius: height / 2, backgroundColor: track ?? (onPlum ? tokens.plumTrack : tokens.neutralTint) },
+        { height, borderRadius: radius ?? height / 2, backgroundColor: track ?? (onPlum ? tokens.plumTrack : tokens.neutralTint) },
         style,
       ]}
       accessible
@@ -57,10 +63,11 @@ export default function ProgressBar({
       accessibilityLabel={accessibilityLabel}
       accessibilityValue={{ min: 0, max: 100, now: Math.round(clamped * 100) }}
     >
+      {inset ? <View pointerEvents="none" style={[styles.band, { height: inset.height, backgroundColor: inset.color }]} /> : null}
       <Animated.View
         style={{
           height: "100%",
-          borderRadius: height / 2,
+          borderRadius: radius ?? height / 2,
           overflow: "hidden",
           width: width.interpolate({ inputRange: [0, 1], outputRange: ["0%", "100%"] }),
         }}
@@ -70,6 +77,7 @@ export default function ProgressBar({
         ) : (
           <LinearGradient colors={TAIL} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={StyleSheet.absoluteFill} />
         )}
+        {stripe ? <View pointerEvents="none" style={[styles.band, styles.stripe, { height: stripe.height, backgroundColor: stripe.color }]} /> : null}
       </Animated.View>
     </View>
   );
@@ -78,5 +86,19 @@ export default function ProgressBar({
 const styles = StyleSheet.create({
   track: {
     overflow: "hidden",
+  },
+
+  band: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    top: 0,
+  },
+
+  stripe: {
+    left: 4,
+    right: 4,
+    top: 2,
+    borderRadius: 3,
   },
 });

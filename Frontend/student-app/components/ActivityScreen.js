@@ -81,7 +81,7 @@ export default function ActivityScreen({ activity, context, next, onNext, closin
     : null;
 
   return (
-    <Screen footer={footer} background={level.lessonBg}>
+    <Screen footer={footer} background={level.lessonGradient}>
       <Header title={activity.title} subtitle={where} backLabel="chapter" onBack={onBack} />
       {context?.steps > 1 ? <StepBar step={context.step} steps={context.steps} course={context.courseTitle} /> : null}
 

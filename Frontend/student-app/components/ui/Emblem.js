@@ -105,7 +105,7 @@ function Pattern({ world }) {
 }
 
 const styles = StyleSheet.create({
-  glyph: { ...StyleSheet.absoluteFillObject, alignItems: "center", justifyContent: "center" },
+  glyph: { ...StyleSheet.absoluteFill, alignItems: "center", justifyContent: "center" },
   seal: {
     position: "absolute",
     alignItems: "center",

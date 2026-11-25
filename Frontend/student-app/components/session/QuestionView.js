@@ -1,82 +1,100 @@
-import React from "react";
-import { Pressable, StyleSheet, TextInput, View } from "react-native";
+import React, { useEffect, useRef } from "react";
+import { Animated, StyleSheet, TextInput, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 
-import { fonts, layout, level, levelLabel, space, tokens, type } from "../../theme";
+import { edge, fonts, layout, levelLabel, space, tokens, type, ui } from "../../theme";
 import AppText from "../ui/AppText";
-import { BLANK, splitBlank } from "./sessionModel";
+import { popTiming, shakeTiming, useReducedMotion } from "../ui/motion";
+import PressLip from "../ui/PressLip";
+import DragBlank from "./DragBlank";
+import Rise from "./Rise";
+import { BLANK, formatFor, splitBlank } from "./sessionModel";
 
 const HEADINGS = {
   choice: "CHOOSE THE ANSWER",
   truefalse: "TRUE OR FALSE",
   fill: "FILL IN THE BLANK",
+  drag: "FILL THE GAP",
 };
 
-// Short options sit in a 2×2 grid of big tiles; longer ones stack.
+// Short options sit in a 2×2 grid of tiles; longer ones stack.
 const isShortSet = (options) =>
   options.length === 4 && options.every((o) => String(o).length <= 14);
 
-// One question. Choice and true/false answer on tap; fill-in is typed and
-// checked with the session's button.
+// One question. A choice is picked first (selected), then checked with the session's button; fill-in
+// is typed and checked the same way. Some blank questions are shown as "drag into the gap" instead of
+// tiles (formatFor), with the same answer and check.
 //
-// answer: chosen option index / typed text (undefined before answering).
-// answered: true once feedback shows (locks input, reveals the answer).
+// selected: the picked option before checking. answer: the checked option / typed text.
+// answered: true once checked (locks input, reveals the right answer).
+// onDragging(bool): a word is being dragged (the session stops its scroll meanwhile).
 export default function QuestionView({
   question,
   stageNumber,
+  selected,
   answer,
   answered,
-  onChoose,
+  onSelect,
   onType,
   onSubmitText,
+  onDragging,
 }) {
   const isFill = question.kind === "fill";
-  const correctWord =
-    answered && question.correctIndex !== null ? question.options[question.correctIndex] : null;
+  const format = formatFor(question);
+  const pick = answered ? answer : selected;
 
   return (
     <View>
-      <AppText style={levelLabel}>
-        STAGE {stageNumber} · {HEADINGS[question.kind]}
-      </AppText>
-
-      {isFill && question.sentence && question.prompt !== question.sentence && BLANK.test(question.sentence) ? (
-        <AppText tone="secondary" style={styles.instruction}>
-          {question.prompt}
+      <Rise order={0}>
+        <AppText style={levelLabel}>
+          STAGE {stageNumber} · {HEADINGS[format === "drag" ? "drag" : question.kind]}
         </AppText>
-      ) : null}
+      </Rise>
 
-      <Prompt
-        question={question}
-        // In the blank: the typed text (fill-in), or the right word once
-        // a choice question is answered.
-        slot={isFill ? answer || "" : correctWord}
-        slotTone={isFill ? "typed" : "correct"}
-      />
-
-      {isFill ? (
-        <TextInput
-          value={answer ?? ""}
-          onChangeText={onType}
-          editable={!answered}
-          placeholder="Type your answer"
-          placeholderTextColor={tokens.textTertiary}
-          autoCapitalize="none"
-          autoCorrect={false}
-          returnKeyType="done"
-          onSubmitEditing={() => (answer ?? "").trim() && onSubmitText()}
-          style={[styles.input, answered && styles.inputLocked]}
-          accessibilityLabel="Your answer"
-        />
+      {format === "drag" ? (
+        <DragBlank question={question} pick={pick} answered={answered} onSelect={onSelect} onDragging={onDragging} />
       ) : (
-        <Options question={question} answer={answer} answered={answered} onChoose={onChoose} />
+        <>
+          {isFill && question.sentence && question.prompt !== question.sentence && BLANK.test(question.sentence) ? (
+            <Rise order={1}>
+              <AppText tone="secondary" style={styles.instruction}>
+                {question.prompt}
+              </AppText>
+            </Rise>
+          ) : null}
+
+          <Rise order={1}>
+            <Prompt question={question} pick={pick} answer={answer} answered={answered} />
+          </Rise>
+
+          {isFill ? (
+            <Rise order={2}>
+              <TextInput
+                value={answer ?? ""}
+                onChangeText={onType}
+                editable={!answered}
+                placeholder="Type your answer"
+                placeholderTextColor={tokens.textTertiary}
+                autoCapitalize="none"
+                autoCorrect={false}
+                returnKeyType="done"
+                onSubmitEditing={() => (answer ?? "").trim() && onSubmitText()}
+                style={[styles.input, answered && styles.inputLocked]}
+                accessibilityLabel="Your answer"
+              />
+            </Rise>
+          ) : (
+            <Options question={question} pick={pick} answered={answered} onSelect={onSelect} />
+          )}
+        </>
       )}
     </View>
   );
 }
 
-// The prompt in the display face. A "___" blank becomes a tinted slot.
-function Prompt({ question, slot, slotTone }) {
+// The prompt in the display face. A "___" blank is a soft inset slot; a picked word sits in it as a
+// pill, and once checked the right word does (in the correct colours).
+function Prompt({ question, pick, answer, answered }) {
   const text = BLANK.test(question.sentence ?? "") ? question.sentence : question.prompt;
   const parts = question.kind === "fill" ? splitBlank(question) : null;
   const split = parts ?? (BLANK.test(text ?? "") ? { before: text.split(BLANK)[0], after: text.split(BLANK).slice(1).join("____") } : null);
@@ -85,33 +103,58 @@ function Prompt({ question, slot, slotTone }) {
     return <AppText style={styles.prompt}>{text}</AppText>;
   }
 
-  const filled = Boolean(slot);
-  const slotStyle = !filled
-    ? styles.slotEmpty
-    : slotTone === "correct"
-      ? styles.slotCorrect
-      : styles.slotTyped;
+  let word = null;
+  let look = "picked";
+  if (question.kind === "fill") {
+    word = answer || null;
+  } else if (answered && question.correctIndex !== null) {
+    word = question.options[question.correctIndex];
+    look = "correct";
+  } else if (pick !== undefined && pick !== null) {
+    word = question.options[pick];
+  }
 
   return (
     <AppText style={styles.prompt}>
       {split.before}
-      {filled ? (
-        <AppText style={[styles.prompt, slotStyle]}>{` ${slot} `}</AppText>
-      ) : (
-        // the empty gap: a soft rounded box in the line, 64 x 30
-        <View accessible accessibilityLabel="blank" style={styles.blank} />
-      )}
+      {word ? <GapPill word={String(word)} look={look} /> : <View accessible accessibilityLabel="blank" style={styles.blank}><View style={styles.blankInset} /></View>}
       {split.after}
     </AppText>
   );
 }
 
-function Options({ question, answer, answered, onChoose }) {
+// The word in the sentence's gap: a pale green pill on a 3 dp edge; it pops when it changes.
+function GapPill({ word, look }) {
+  const reduce = useReducedMotion();
+  const pop = useRef(new Animated.Value(1)).current;
+  useEffect(() => {
+    if (reduce) return undefined;
+    pop.setValue(0);
+    const run = popTiming(pop);
+    run.start();
+    return () => run.stop();
+  }, [word, look, reduce, pop]);
+  const colors = look === "correct" ? { bg: ui.correct.face, lip: ui.correct.edge, ink: ui.correct.ink } : { bg: ui.pill.bg, lip: ui.pill.edge, ink: ui.selected.ink };
+  return (
+    <Animated.View
+      accessible
+      accessibilityLabel={look === "correct" ? `${word}, the right answer` : `${word}, in the blank`}
+      style={[styles.pillBox, { transform: [{ translateY: 7 }, { scale: pop.interpolate({ inputRange: [0, 1], outputRange: [0.7, 1] }) }] }]}
+    >
+      <View style={[styles.pillLip, { backgroundColor: colors.lip }]} />
+      <View style={[styles.pill, { backgroundColor: colors.bg }]}>
+        <AppText style={[styles.pillText, { color: colors.ink }]}>{word}</AppText>
+      </View>
+    </Animated.View>
+  );
+}
+
+function Options({ question, pick, answered, onSelect }) {
   const state = (index) => {
-    if (!answered) return "idle";
-    if (question.correctIndex === null) return index === answer ? "chosen" : "dimmed";
+    if (!answered) return index === pick ? "selected" : "idle";
+    if (question.correctIndex === null) return index === pick ? "selected" : "dimmed";
     if (index === question.correctIndex) return "correct";
-    if (index === answer) return "wrong";
+    if (index === pick) return "wrong";
     return "dimmed";
   };
 
@@ -120,82 +163,87 @@ function Options({ question, answer, answered, onChoose }) {
   return (
     <View style={grid ? styles.grid : styles.list}>
       {question.options.map((option, index) => (
-        <Tile
-          key={index}
-          label={String(option)}
-          state={state(index)}
-          disabled={answered}
-          compact={!grid}
-          tall={question.kind === "truefalse"}
-          onPress={() => onChoose(index)}
-        />
+        <Rise key={index} order={2 + index} style={grid ? styles.cell : null}>
+          <Tile
+            label={String(option)}
+            state={state(index)}
+            disabled={answered}
+            compact={!grid}
+            onPress={() => onSelect(index)}
+          />
+        </Rise>
       ))}
     </View>
   );
 }
 
-// An answer is a white card with a 2 dp border and a 4 dp edge under it; a tap presses it down onto
-// that edge. After answering, the right / wrong / chosen colours take over (the edge follows them).
+// An answer: a white face with a 2 dp border on a 5 dp edge; a tap sinks it. Picked: pale green with a
+// green edge. Checked: the right one turns green and pops, a wrong pick turns red and shakes.
 const TILE = {
-  idle: { bg: tokens.surface, border: level.card, edge: level.card, text: tokens.text },
-  chosen: { bg: tokens.accentTint, border: tokens.accent, edge: tokens.accent, text: tokens.text },
-  correct: { bg: tokens.correct, border: tokens.correct, edge: tokens.correct, text: "#FFFFFF", badge: "correct" },
-  wrong: { bg: tokens.wrongTint, border: tokens.wrong, edge: tokens.wrong, text: tokens.text, badge: "wrong" },
-  dimmed: { bg: tokens.surface, border: level.card, edge: level.card, text: tokens.textSecondary },
+  idle: { bg: ui.surface, edge: ui.surfaceEdge, text: tokens.text },
+  selected: { bg: ui.selected.face, edge: ui.selected.edge, text: ui.selected.ink },
+  correct: { bg: ui.correct.face, edge: ui.correct.edge, text: ui.correct.ink, badge: "correct" },
+  wrong: { bg: ui.wrong.face, edge: ui.wrong.edge, text: ui.wrong.ink, badge: "wrong" },
+  dimmed: { bg: ui.surface, edge: ui.surfaceEdge, text: tokens.textSecondary },
 };
-const EDGE = 4;
 
-function Tile({ label, state, disabled, compact, tall, onPress }) {
+function Tile({ label, state, disabled, compact, onPress }) {
   const look = TILE[state];
+  const reduce = useReducedMotion();
+  const pop = useRef(new Animated.Value(1)).current;
+  const shake = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    if (reduce) return undefined;
+    let run = null;
+    if (state === "correct") {
+      pop.setValue(0);
+      run = popTiming(pop);
+    } else if (state === "wrong") {
+      run = shakeTiming(shake);
+    }
+    run?.start();
+    return () => run?.stop();
+  }, [state, reduce, pop, shake]);
 
   return (
-    <Pressable
-      onPress={disabled ? undefined : onPress}
-      disabled={disabled}
-      accessibilityRole="button"
-      accessibilityLabel={
-        state === "correct" ? `${label}, correct answer` : state === "wrong" ? `${label}, your answer` : label
-      }
-      accessibilityState={{ disabled }}
-      style={[compact ? styles.slotRow : styles.slot, tall && styles.slotTall]}
+    <Animated.View
+      style={{
+        transform: [{ translateX: shake }, { scale: pop.interpolate({ inputRange: [0, 1], outputRange: [0.92, 1] }) }],
+      }}
     >
-      {({ pressed }) => (
-        <>
-          <View style={[styles.edge, { backgroundColor: look.edge }]} />
+      <PressLip
+        onPress={onPress}
+        disabled={disabled}
+        haptics
+        lip={look.edge}
+        lipSize={edge.tile.depth}
+        radius={edge.tile.radius}
+        border
+        accessibilityLabel={
+          state === "correct" ? `${label}, correct answer` : state === "wrong" ? `${label}, your answer` : label
+        }
+        accessibilityState={{ selected: state === "selected" }}
+        faceStyle={[compact ? styles.tileRow : styles.tile, { backgroundColor: look.bg }]}
+      >
+        <AppText style={[compact ? styles.tileTextRow : styles.tileText, { color: look.text }]}>{label}</AppText>
+        {look.badge ? (
           <View
             style={[
-              compact ? styles.tileRow : styles.tile,
-              { backgroundColor: look.bg, borderColor: look.border },
-              pressed && !disabled && styles.tilePressed,
+              styles.badge,
+              compact ? null : styles.badgeCorner,
+              { backgroundColor: look.badge === "correct" ? "#FFFFFF" : ui.wrong.edge },
             ]}
           >
-            <AppText
-              style={[
-                compact ? styles.tileTextRow : styles.tileText,
-                { color: look.text },
-              ]}
-            >
-              {label}
-            </AppText>
-            {look.badge ? (
-              <View
-                style={[
-                  styles.badge,
-                  compact ? styles.badgeRow : styles.badgeCorner,
-                  { backgroundColor: look.badge === "correct" ? "#FFFFFF" : tokens.wrong },
-                ]}
-              >
-                <Ionicons
-                  name={look.badge === "correct" ? "checkmark" : "close"}
-                  size={15}
-                  color={look.badge === "correct" ? tokens.correct : "#FFFFFF"}
-                />
-              </View>
-            ) : null}
+            <Ionicons
+              name={look.badge === "correct" ? "checkmark" : "close"}
+              size={15}
+              color={look.badge === "correct" ? ui.correct.face : "#FFFFFF"}
+            />
           </View>
-        </>
-      )}
-    </Pressable>
+        ) : null}
+      </PressLip>
+    </Animated.View>
   );
 }
 
@@ -207,36 +255,50 @@ const styles = StyleSheet.create({
   prompt: {
     fontFamily: fonts.display,
     fontSize: 26,
-    lineHeight: 36,
+    lineHeight: 42,
     letterSpacing: -0.4,
     color: tokens.text,
     marginTop: space.md,
   },
 
-  slotEmpty: {
-    backgroundColor: level.blank,
-    marginTop: 0,
-  },
-
+  // the empty gap: a 78 x 34 rounded slot with a darker 3 dp band along its inside top
   blank: {
-    width: 64,
-    height: 30,
+    width: 78,
+    height: 34,
     marginHorizontal: 4,
-    borderRadius: 8,
-    backgroundColor: level.blank,
-    transform: [{ translateY: 5 }], // sits on the line, like the words around it
+    borderRadius: 10,
+    overflow: "hidden",
+    backgroundColor: ui.slot,
+    transform: [{ translateY: 7 }],
   },
 
-  slotCorrect: {
-    color: tokens.correct,
-    backgroundColor: tokens.correctTint,
-    marginTop: 0,
+  blankInset: {
+    height: 3,
+    backgroundColor: ui.slotInset,
   },
 
-  slotTyped: {
-    color: tokens.accentText,
-    backgroundColor: tokens.accentTint,
-    marginTop: 0,
+  pillBox: {
+    marginHorizontal: 4,
+    paddingBottom: 3,
+  },
+
+  pillLip: {
+    ...StyleSheet.absoluteFill,
+    top: 3,
+    borderRadius: 10,
+  },
+
+  pill: {
+    height: 31,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    justifyContent: "center",
+  },
+
+  pillText: {
+    fontFamily: fonts.display,
+    fontSize: 20,
+    lineHeight: 24,
   },
 
   grid: {
@@ -246,43 +308,18 @@ const styles = StyleSheet.create({
     gap: 14,
   },
 
+  cell: {
+    flexBasis: "45%",
+    flexGrow: 1,
+  },
+
   list: {
     marginTop: space.xxl,
     gap: space.md,
   },
 
-  // A card's place: the card itself plus the 4 dp edge showing under it.
-  slot: {
-    flexBasis: "47%",
-    flexGrow: 1,
-    height: 88 + EDGE,
-  },
-
-  slotTall: {
-    height: 112 + EDGE,
-  },
-
-  slotRow: {
-    paddingBottom: EDGE,
-  },
-
-  edge: {
-    position: "absolute",
-    left: 0,
-    right: 0,
-    top: EDGE,
-    bottom: 0,
-    borderRadius: level.cardRadius,
-  },
-
   tile: {
-    position: "absolute",
-    left: 0,
-    right: 0,
-    top: 0,
-    bottom: EDGE,
-    borderRadius: level.cardRadius,
-    borderWidth: 2,
+    height: 68,
     alignItems: "center",
     justifyContent: "center",
     paddingHorizontal: space.md,
@@ -290,8 +327,6 @@ const styles = StyleSheet.create({
 
   tileRow: {
     minHeight: 64,
-    borderRadius: level.cardRadius,
-    borderWidth: 2,
     flexDirection: "row",
     alignItems: "center",
     paddingHorizontal: space.lg,
@@ -299,46 +334,41 @@ const styles = StyleSheet.create({
     gap: space.md,
   },
 
-  // pressed down onto its edge
-  tilePressed: {
-    transform: [{ translateY: EDGE }],
-  },
-
   tileText: {
-    ...type.answer,
-    fontSize: 20,
-    lineHeight: 26,
+    fontFamily: fonts.semibold,
+    fontSize: 18,
+    lineHeight: 24,
     textAlign: "center",
   },
 
   tileTextRow: {
-    ...type.bodyStrong,
+    fontFamily: fonts.semibold,
+    fontSize: 16,
+    lineHeight: 22,
     flex: 1,
   },
 
   badge: {
-    width: 26,
-    height: 26,
-    borderRadius: 13,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
     alignItems: "center",
     justifyContent: "center",
   },
 
   badgeCorner: {
     position: "absolute",
-    top: 10,
-    right: 10,
+    top: 8,
+    right: 8,
   },
-
-  badgeRow: {},
 
   input: {
     ...type.body,
     marginTop: space.xxl,
     color: tokens.text,
     minHeight: 58,
-    borderWidth: 1.5,
-    borderColor: tokens.divider,
+    borderWidth: 2,
+    borderColor: ui.surfaceEdge,
     borderRadius: layout.tileRadius - 4,
     backgroundColor: tokens.surface,
     paddingHorizontal: space.lg,
@@ -348,3 +378,4 @@ const styles = StyleSheet.create({
     color: tokens.textSecondary,
   },
 });
+

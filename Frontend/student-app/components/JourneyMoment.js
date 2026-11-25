@@ -7,6 +7,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { layout, space, TAIL, tailAt, tokens } from "../theme";
 import AppText from "./ui/AppText";
+import Confetti from "./ui/Confetti";
 import { Entrance } from "./ui/anim";
 import Emblem from "./ui/Emblem";
 import EmberButton from "./ui/EmberButton";
@@ -56,7 +57,7 @@ export default function JourneyMoment({
           <Entrance delay={260} distance={36} style={[styles.fox, { left: width / 2 + 24, bottom: 8 }]}>
             <Fox mood={celebrate ? "proud" : "greeting"} size={176} />
           </Entrance>
-          {celebrate ? <Confetti world={world} width={width} /> : null}
+          {celebrate ? <Confetti colors={[tailAt(0), tailAt(0.5), tailAt(1), world.tint, world.bg]} width={width} height={STAGE} /> : null}
         </View>
 
         <View style={styles.copy}>
@@ -140,59 +141,6 @@ function Rays({ color, spin, width }) {
     >
       <Svg width={size} height={size}>{wedges}</Svg>
     </Animated.View>
-  );
-}
-
-// A shower of confetti, once, in the tail's colours and the world's. Nothing when motion is reduced.
-function Confetti({ world, width }) {
-  const reduce = useReducedMotion();
-  const pieces = useMemo(
-    () =>
-      Array.from({ length: 22 }, (_, i) => ({
-        x: ((i * 37) % 100) / 100,
-        delay: (i % 7) * 140,
-        drift: ((i % 5) - 2) * 14,
-        size: 7 + (i % 3) * 3,
-        round: i % 2 === 0,
-        color: [tailAt(0), tailAt(0.5), tailAt(1), world.tint, world.bg][i % 5],
-        value: new Animated.Value(0),
-      })),
-    [world],
-  );
-  useEffect(() => {
-    if (reduce) return undefined;
-    const runs = pieces.map((p) =>
-      Animated.timing(p.value, { toValue: 1, duration: 2600 + (p.delay % 5) * 200, delay: p.delay, easing: Easing.in(Easing.quad), useNativeDriver: true }),
-    );
-    const all = Animated.parallel(runs);
-    all.start();
-    return () => all.stop();
-  }, [pieces, reduce]);
-  if (reduce) return null;
-
-  return (
-    <View pointerEvents="none" style={StyleSheet.absoluteFill}>
-      {pieces.map((p, i) => (
-        <Animated.View
-          key={i}
-          style={{
-            position: "absolute",
-            left: p.x * (width - 20) + 10,
-            top: -20,
-            width: p.size,
-            height: p.round ? p.size : p.size * 1.8,
-            borderRadius: p.round ? p.size / 2 : 2,
-            backgroundColor: p.color,
-            opacity: p.value.interpolate({ inputRange: [0, 0.1, 0.85, 1], outputRange: [0, 1, 1, 0] }),
-            transform: [
-              { translateY: p.value.interpolate({ inputRange: [0, 1], outputRange: [0, STAGE + 40] }) },
-              { translateX: p.value.interpolate({ inputRange: [0, 1], outputRange: [0, p.drift] }) },
-              { rotate: p.value.interpolate({ inputRange: [0, 1], outputRange: ["0deg", `${p.drift * 12}deg`] }) },
-            ],
-          }}
-        />
-      ))}
-    </View>
   );
 }
 

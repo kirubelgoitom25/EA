@@ -50,7 +50,8 @@ export function chapterPath(state, lesson) {
         ? "Read"
         : anyStarted ? "Continue" : "Start";
 
-  const routeItems = items.map((item) => {
+  // label: the small eyebrow beside a step that isn't the current one ("Lesson 2"), over its title
+  const routeItems = items.map((item, i) => {
     const upNext = item.status === "next";
     const done = item.status === "done";
     if (item.kind === "stage") {
@@ -59,6 +60,7 @@ export function chapterPath(state, lesson) {
         id: `stage-${lesson.id}-${item.stageIndex}`,
         status: item.status,
         type: "questions",
+        label: `Lesson ${i + 1}`,
         kicker: `${item.size} questions`,
         action: actionFor(item),
         title: many ? `Questions · stage ${item.stageIndex + 1}` : "Questions",
@@ -72,6 +74,7 @@ export function chapterPath(state, lesson) {
       id: `activity-${activity.id}`,
       status: item.status,
       type: isVideo ? "video" : "reading",
+      label: `Lesson ${i + 1}`,
       kicker: isVideo ? "Video" : "Reading",
       action: actionFor(item),
       title: activity.title,

@@ -8,7 +8,7 @@ import { accessLine, canRenew } from "../services/access";
 import { loadProgressSummary } from "../services/chapterProgress";
 import { hasSeen, markSeen } from "../services/journey";
 import { chapterWord, isCourseComplete } from "../services/journeyModel";
-import { layout, levelLabel, space, stone, tokens } from "../theme";
+import { edge, fonts, layout, space, tokens, ui } from "../theme";
 import BottomNavBar from "./BottomNavBar";
 import { PANEL_HEIGHT, cachedChapter, prefetchChapter } from "./ChapterPathScreen";
 import { chapterPath } from "./chapterPathModel";
@@ -19,19 +19,20 @@ import { useArrival } from "./ui/arrival";
 import { FoxFigure } from "./ui/CourseFox";
 import Button from "./ui/Button";
 import DotGrid from "./ui/DotGrid";
-import Emblem from "./ui/Emblem";
 import EmptyState from "./ui/EmptyState";
 import { LEDGE_FOX, scaleOf } from "./ui/foxPlacement";
 import { useFoxReact } from "./ui/FoxContext";
 import { ADVANCE, ARRIVAL, SCREEN } from "./ui/pathMotionModel";
 import { handOff, takeHandoff } from "./ui/handoff";
 import { pathPoints } from "./ui/pathModel";
-import Rock, { rockBox } from "./ui/Rock";
+import Rock, { PATH_TILE, rockBox } from "./ui/Rock";
 import { win } from "./ui/StepMorph";
 import ProgressBar from "./ui/ProgressBar";
 import Route, { routeMetrics } from "./ui/Route";
 import { NAV_BAR_HEIGHT, TAB_BAR_HEIGHT } from "./ui/Screen";
-import { useReducedMotion } from "./ui/motion";
+import { CURVE, useReducedMotion } from "./ui/motion";
+import PressLip, { EdgeBox } from "./ui/PressLip";
+import StatChips from "./ui/StatChips";
 import StatusBarScrim, { scrimOnScroll } from "./ui/StatusBarScrim";
 
 // A course as a journey. No hero picture: the course's own emblem (its colour, pattern and subject)
@@ -44,6 +45,8 @@ const BAR_CHANGE = { delay: ADVANCE.lead + ADVANCE.bar[0], duration: ADVANCE.bar
 
 export default function CourseScreen({
   userId,
+  student,
+  ranking,
   course,
   isMine,
   onToggleMine,
@@ -141,11 +144,11 @@ export default function CourseScreen({
   // How far the page has scrolled past the top of the route, for the route's moving line.
   const routeScroll = useRef(new Animated.Value(0)).current;
   const scrolledToNow = useRef(false);
-  const nodeY = () => routeTop.current + routeMetrics(items, true).centers[nextIndex];
+  const nodeY = () => routeTop.current + routeMetrics(items, true, true, true, "course", screenWidth).centers[nextIndex];
   // Where that leaves the page.
   const landingY = () => {
     if (nextIndex < 0) return 0;
-    const stopY = routeTop.current + routeMetrics(items, true).offsets[nextIndex];
+    const stopY = routeTop.current + routeMetrics(items, true, true, true, "course", screenWidth).offsets[nextIndex];
     return stopY + 170 > screenHeight - 220 ? Math.max(0, stopY - screenHeight * 0.28) : 0;
   };
   const scrollToNow = () => {
@@ -157,7 +160,7 @@ export default function CourseScreen({
 
   // The arrival plays what will be in view once the page has landed.
   const startArrival = () => {
-    const { centers, den, total: height } = routeMetrics(items, true);
+    const { centers, den, total: height } = routeMetrics(items, true, true, true, "course", screenWidth);
     const landing = landingY();
     const top = landing - routeTop.current;
     arrival?.start({
@@ -233,10 +236,10 @@ export default function CourseScreen({
     const target = path.nextAt;
     if (target < 0) return null;
     const pathWidth = screenWidth - layout.gutter * 2;
-    const there = pathPoints(path.routeItems, true, pathWidth, true, true, { frame: screenWidth });
-    const to = { x: layout.gutter + there.points[target].x, y: insets.top + PANEL_HEIGHT + space.xl + there.layout.centers[target] };
+    const there = pathPoints(path.routeItems, true, pathWidth, true, true, { frame: screenWidth, trail: "chapter" });
+    const to = { x: layout.gutter + there.points[target].x, y: insets.top + PANEL_HEIGHT + there.layout.centers[target] };
     if (to.y + 90 > screenHeight) return null;
-    const here = pathPoints(items, true, pathWidth, true, true, { frame: screenWidth });
+    const here = pathPoints(items, true, pathWidth, true, true, { frame: screenWidth, trail: "course" });
     const from = { x: layout.gutter + here.points[i].x, y: routeTop.current + here.layout.centers[i] - scrollNow.current };
     return { chapter, target, from, to, iconTo: LESSON_ICONS[path.routeItems[target].type] ?? "play" };
   };
@@ -282,35 +285,56 @@ export default function CourseScreen({
       >
         <DotGrid />
 
-        <Animated.View style={[styles.header, { paddingTop: insets.top + 60 }, arrival?.looks.header]}>
-          <Emblem course={course} size={48} radius={15} />
-          <Animated.View style={[styles.titleBlock, exitLooks.title]}>
-            <View>
-              <AppText style={levelLabel}>COURSE</AppText>
-              <AppText variant="title" numberOfLines={2} style={styles.title}>
-                {course.title}
-              </AppText>
-            </View>
-            {total > 0 ? (
-              <ProgressBar
-                value={doneCount / total}
-                height={5}
-                fill={stone.moss}
-                track={stone.rockLight}
-                intro={arrival ? ARRIVAL.bar : undefined}
-                change={BAR_CHANGE}
-                accessibilityLabel={`${doneCount} of ${total} ${chapterWord(total)} done`}
-              />
-            ) : null}
-            {canRenew(course) ? (
-              <Pressable onPress={onRenew} accessibilityRole="button" hitSlop={space.sm}>
-                <AppText variant="caption" tone="secondary" style={styles.accessLine}>
-                  {`${accessLine(course)} · `}
-                  <AppText variant="caption" style={styles.renew}>Renew</AppText>
+        {/* the green banner card: which chapter you are on, its name, the course's progress, and a
+            button to that chapter's lessons; it overlaps the top 14 dp of the scenery */}
+        <Animated.View style={[styles.header, { paddingTop: insets.top + TOP_BAR + 4 }, arrival?.looks.header]}>
+          <EdgeBox lip={ui.primaryEdge} lipSize={edge.banner.depth} radius={edge.banner.radius} faceStyle={styles.banner}>
+            <Animated.View style={[styles.titleBlock, exitLooks.title]}>
+              <View>
+                <AppText style={styles.kicker} numberOfLines={1}>
+                  {total > 0 ? (nextIndex >= 0 ? `CHAPTER ${nextIndex + 1} OF ${total}` : `${total} OF ${total} CHAPTERS DONE`) : "COURSE"}
                 </AppText>
-              </Pressable>
+                <AppText numberOfLines={2} style={styles.title}>
+                  {nextIndex >= 0 ? chapters[nextIndex].title : course.title}
+                </AppText>
+              </View>
+              {total > 0 ? (
+                <ProgressBar
+                  value={doneCount / total}
+                  height={10}
+                  radius={6}
+                  fill={ui.bannerFill}
+                  track={ui.primaryEdge}
+                  stripe={{ color: ui.bannerFillTop, height: 3 }}
+                  curve={CURVE.fill}
+                  intro={arrival ? ARRIVAL.bar : undefined}
+                  change={BAR_CHANGE}
+                  accessibilityLabel={`${doneCount} of ${total} ${chapterWord(total)} done`}
+                />
+              ) : null}
+              {canRenew(course) ? (
+                <Pressable onPress={onRenew} accessibilityRole="button" hitSlop={space.sm}>
+                  <AppText variant="caption" style={styles.accessLine}>
+                    {`${accessLine(course)} · `}
+                    <AppText variant="caption" style={styles.renew}>Renew</AppText>
+                  </AppText>
+                </Pressable>
+              ) : null}
+            </Animated.View>
+            {nextIndex >= 0 ? (
+              <PressLip
+                onPress={() => openChapter(nextIndex)}
+                accessibilityLabel={`Open chapter ${nextIndex + 1} lessons`}
+                lip="#1E4331"
+                lipSize={4}
+                radius={14}
+                haptics
+                faceStyle={styles.listButton}
+              >
+                <Ionicons name="list" size={24} color="#FFFFFF" />
+              </PressLip>
             ) : null}
-          </Animated.View>
+          </EdgeBox>
         </Animated.View>
 
         {total === 0 ? (
@@ -328,6 +352,8 @@ export default function CourseScreen({
           >
             <Route
               items={items}
+              scenery
+              cloud={{ x: 157, y: 20 }}
               mascot={mascotVariant}
               arrival={arrival}
               scrollY={routeScroll}
@@ -357,33 +383,49 @@ export default function CourseScreen({
         ) : null}
       </ScrollView>
 
-      <StatusBarScrim visible={scrolled} color={stone.bg} />
+      <StatusBarScrim visible={scrolled} color={ui.screen} />
 
       {away && nextIndex >= 0 ? (
         <View style={[styles.jumpRow, { bottom: TAB_BAR_HEIGHT + insets.bottom + space.md }]} pointerEvents="box-none">
-          <Pressable
+          <PressLip
             onPress={jumpToNow}
-            accessibilityRole="button"
             accessibilityLabel={`Jump to chapter ${nextIndex + 1}`}
-            style={({ pressed }) => [styles.jump, pressed && styles.pressed]}
+            lip={ui.surfaceEdge}
+            lipSize={edge.topButton.depth}
+            radius={edge.topButton.radius}
+            border
+            haptics
+            faceStyle={styles.jump}
           >
             <Ionicons name={away === "above" ? "arrow-up" : "arrow-down"} size={16} color={tokens.accentText} />
             <AppText variant="label" tone="accent">
               Chapter {nextIndex + 1}
             </AppText>
-          </Pressable>
+          </PressLip>
         </View>
       ) : null}
 
-      <Pressable
-        onPress={onBack}
-        hitSlop={space.sm}
-        accessibilityRole="button"
-        accessibilityLabel={backLabel ? `Back to ${backLabel}` : "Go back"}
-        style={({ pressed }) => [styles.back, { top: insets.top + space.sm }, pressed && styles.pressed]}
-      >
-        <Ionicons name="chevron-back" size={22} color={tokens.text} />
-      </Pressable>
+      {/* the top bar, fixed: the course pill (back to your courses, to switch) and the stat chips */}
+      <View style={[styles.topBar, { top: insets.top, backgroundColor: scrolled ? ui.screen : "transparent" }]} pointerEvents="box-none">
+        <PressLip
+          onPress={onBack}
+          hitSlop={space.sm}
+          accessibilityLabel={`${course.title}. ${backLabel ? `Back to ${backLabel}` : "Go back"}`}
+          lip={ui.surfaceEdge}
+          lipSize={edge.topButton.depth}
+          radius={edge.topButton.radius}
+          border
+          haptics
+          style={styles.pillBox}
+          faceStyle={styles.pill}
+        >
+          <AppText numberOfLines={1} style={styles.pillText}>
+            {course.title}
+          </AppText>
+          <Ionicons name="chevron-down" size={18} color={tokens.text} />
+        </PressLip>
+        {student ? <StatChips user={student} ranking={ranking} onRanking={onRanking} /> : null}
+      </View>
 
       {/* the tab bar slides away as the page leaves for a chapter (the chapter page has none) */}
       <Animated.View
@@ -425,6 +467,9 @@ export default function CourseScreen({
     </Animated.View>
   );
 }
+
+// the fixed top bar: 14 dp above the 48 dp pill and chips, 10 below
+const TOP_BAR = 14 + 48 + 10;
 
 const LESSON_ICONS = { video: "play", reading: "document-text", questions: "help" };
 
@@ -471,14 +516,14 @@ const FlyingTile = forwardRef(function FlyingTile({ clock, onTap }, ref) {
   }, [flight, clock]);
   if (!flight) return null;
   const { plan } = flight;
-  const box = rockBox(84);
+  const box = rockBox(PATH_TILE);
   return (
     <>
       <Pressable style={StyleSheet.absoluteFill} onPress={onTap} accessible={false} importantForAccessibility="no" />
       <Animated.View pointerEvents="none" style={[{ position: "absolute", left: plan.from.x - box.cx, top: plan.from.y - box.cy }, look.box]}>
-        <Rock status="next" size={84} icon="play" ring wait={60000} />
+        <Rock status="next" size={PATH_TILE} icon="play" ring wait={60000} />
         <Animated.View style={[StyleSheet.absoluteFill, look.icon]}>
-          <Rock status="next" size={84} icon={plan.iconTo} ring wait={60000} />
+          <Rock status="next" size={PATH_TILE} icon={plan.iconTo} ring wait={60000} />
         </Animated.View>
       </Animated.View>
     </>
@@ -486,33 +531,97 @@ const FlyingTile = forwardRef(function FlyingTile({ clock, onTap }, ref) {
 });
 
 const styles = StyleSheet.create({
-  accessLine: { marginTop: space.xs },
-  renew: { color: tokens.accentText },
+  accessLine: { marginTop: 2, color: ui.bannerKicker },
+  renew: { color: "#FFFFFF", fontFamily: fonts.display },
   root: {
     flex: 1,
-    backgroundColor: stone.bg,
+    backgroundColor: ui.screen,
   },
 
   header: {
+    paddingHorizontal: 16,
+    zIndex: 2,
+    elevation: 2,
+  },
+
+  banner: {
     flexDirection: "row",
     alignItems: "center",
     gap: space.md,
-    paddingHorizontal: layout.gutter,
+    padding: 15,
+    backgroundColor: ui.primary,
+  },
+
+  listButton: {
+    width: 46,
+    height: 46,
+    backgroundColor: "#5F9E7F",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  topBar: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    height: TOP_BAR,
+    paddingTop: 14,
+    paddingHorizontal: 16,
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    gap: space.md,
+  },
+
+  pillBox: {
+    flexShrink: 1,
+  },
+
+  pill: {
+    height: 44,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: space.xs,
+    paddingLeft: space.md,
+    paddingRight: space.sm,
+    backgroundColor: ui.surface,
+  },
+
+  pillText: {
+    flexShrink: 1,
+    fontFamily: fonts.display,
+    fontSize: 16,
+    lineHeight: 20,
+    color: tokens.text,
   },
 
   titleBlock: {
     flex: 1,
-    gap: space.sm,
+    gap: 10,
+  },
+
+  kicker: {
+    fontFamily: fonts.display,
+    fontSize: 11,
+    lineHeight: 14,
+    letterSpacing: 1.1,
+    color: ui.bannerKicker,
   },
 
   title: {
-    fontSize: 22,
-    lineHeight: 27,
+    fontFamily: fonts.display,
+    fontSize: 18,
+    lineHeight: 23,
+    letterSpacing: -0.3,
+    color: "#FFFFFF",
+    marginTop: 2,
   },
 
+  // the scenery (drawn by the route) starts 14 dp above the banner's bottom edge, under the banner
   route: {
-    marginTop: space.lg,
+    marginTop: -14,
     marginHorizontal: layout.gutter,
+    zIndex: 1,
   },
 
   pressed: {
@@ -532,29 +641,12 @@ const styles = StyleSheet.create({
     gap: space.xs + 2,
     height: 40,
     paddingHorizontal: space.lg,
-    borderRadius: 14,
-    backgroundColor: tokens.surface,
-    borderWidth: 1,
-    borderColor: tokens.divider,
-    shadowColor: "#2B1A38",
-    shadowOpacity: 0.12,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 4,
+    backgroundColor: ui.surface,
   },
 
   toggleMine: {
     marginTop: space.xl,
   },
 
-  back: {
-    position: "absolute",
-    left: 20,
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: tokens.surface,
-    alignItems: "center",
-    justifyContent: "center",
-  },
+
 });

@@ -233,3 +233,44 @@ export function validAnswers(questions, answers = {}) {
   const keys = new Set(questions.map((q) => q.key));
   return Object.fromEntries(Object.entries(answers).filter(([key]) => keys.has(key)));
 }
+
+// ---------- Formats (polish pass) ----------
+
+// The text that holds a question's blank: its sentence if that has one, else its prompt; null if none.
+export function blankText(question) {
+  if (BLANK.test(question.sentence ?? "")) return question.sentence;
+  if (BLANK.test(question.prompt ?? "")) return question.prompt;
+  return null;
+}
+
+const keyHash = (key) => {
+  let h = 0;
+  for (const ch of String(key)) h = (h * 31 + ch.charCodeAt(0)) | 0;
+  return Math.abs(h);
+};
+
+// How a question is shown: "drag" (drag a word into the gap) or "tiles" (choose the answer). Only a
+// choice question with a blank and 2 to 6 short options can be dragged, and those alternate by their
+// key, so the same question keeps its format on every visit. True/false and fill-in are never dragged.
+export function formatFor(question) {
+  if (question.kind !== "choice" || question.correctIndex === null) return "tiles";
+  if (!blankText(question)) return "tiles";
+  const options = question.options ?? [];
+  if (options.length < 2 || options.length > 6) return "tiles";
+  if (!options.every((o) => String(o).trim().length > 0 && String(o).length <= 18)) return "tiles";
+  return keyHash(question.key) % 2 === 0 ? "drag" : "tiles";
+}
+
+// The longest run of right answers, in order. Saved (ungraded) answers don't break a run or add to it.
+export function bestStreak(questions, answers) {
+  let best = 0;
+  let run = 0;
+  for (const q of questions) {
+    if (!(q.key in answers)) continue;
+    const result = evaluate(q, answers[q.key]);
+    if (result === "saved") continue;
+    run = result === "correct" ? run + 1 : 0;
+    best = Math.max(best, run);
+  }
+  return best;
+}

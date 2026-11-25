@@ -89,13 +89,84 @@ export const level = {
   panelRadius: 28,
   barTrack: "#D3E7DA",
   barFill: "#5E9C7D",
-  lessonBg: "#F2F7F4", // lesson and practice screens
+  lessonBg: "#F2F7F4", // lesson and practice screens (solid fallback)
+  lessonGradient: ["#EEF6F2", "#E3F0EA"], // lesson ground, top to bottom
   segmentDone: "#5E9C7D",
   segmentNow: "#A9D3BC",
   segmentAhead: "#DFE7E2",
   card: "#D6E3DA", // answer cards: border and bottom edge
   cardRadius: 20,
   blank: "#DFEBE3", // the gap in a sentence
+};
+
+// The polish pass (2026-11-11 handoff): every pressable has a solid edge under its face, and these
+// are its colours. Values within a shade of an existing token reuse it (ink, the done tile, the
+// streak flame); the current step keeps its sage look (tokens.accent / stone.here).
+export const ui = {
+  screen: "#F1F6F2",
+  ink: tokens.text,
+  textSecondary: "#3D5246",
+  textMuted: "#4F6257",
+
+  primary: "#3E7257", // CTAs and banners
+  primaryEdge: "#2A5540",
+  bannerKicker: "#E8F5EC",
+  bannerFill: "#A8D3BD",
+  bannerFillTop: "#C9E6D6",
+
+  surface: "#FFFFFF", // white tiles and cards
+  surfaceEdge: "#C3CFC7",
+
+  done: { face: "#A9D3BC", edge: "#84B89B", top: "#C3E3D2", ink: "#2A5540" },
+  locked: { face: "#EEF1EF", edge: "#C3CBC6", top: "#FFFFFF", ink: "#7C8780" },
+  lineDone: "#5F9E7F",
+  lineAhead: "#FFFFFF",
+
+  track: "#DCE6DF",
+  trackInset: "#CBD7CF",
+  fill: "#5FA882",
+  fillTop: "#8CC7A6",
+
+  selected: { face: "#E4F0E7", edge: "#3E7257", ink: "#1F4A35" },
+  correct: { face: "#3E7257", edge: "#2A5540", ink: "#FFFFFF" },
+  wrong: { face: "#FCE4DF", edge: "#C8503C", ink: "#8F2A1B" },
+  correctSheet: { bg: "#DDF0E4", border: "#A8D3BD", title: "#1F4A35", body: "#2A5540" },
+  wrongSheet: { bg: "#FCE4DF", border: "#EDB3A8", title: "#8F2A1B", body: "#8F2A1B" },
+  wrongCta: { face: "#C8503C", edge: "#9C3524" },
+  disabledCta: { face: "#D9E2DC", edge: "#BCC7C0", ink: "#4F5C55" },
+
+  pill: { bg: "#E4F0E7", edge: "#A8D3BD" }, // the chosen word in a sentence, the active tab
+  slot: "#E1E9E4", // an empty gap
+  slotInset: "#D2DCD6",
+  slotDashed: "#A8B8AE",
+  dropHover: "#DDF0E4",
+
+  streak: { bg: "#FFF1DC", edge: "#F3D7A8", ink: "#8A4B00", icon: tokens.flame },
+  xp: { bg: "#E4F0E7", edge: "#BFDAC7", ink: "#2A5540", icon: "#3E7257" },
+  trophy: { bg: "#FCE3EE", edge: "#F2BCD5", ink: "#8E1F55", icon: "#C22D75" },
+
+  // the quiet scenery behind the paths (and a lighter strip under lessons and results)
+  sky: "#EAF3EC",
+  hills: ["#DFEDE3", "#D5E7DB", "#CAE1D1", "#BFDAC7"],
+  tree: "#8FBFA3",
+  treeDark: "#7DB093",
+  trunk: "#B58A63",
+  lightHills: ["#E1EEE5", "#D5E7DB"],
+  lightTree: "#A8CDB6",
+  sun: ["#FFF1DC", "#FFE3B8"],
+  confetti: ["#E0408A", "#F28C1E", "#F7A531", "#5FA882", "#A8D3BD"],
+};
+
+// Edge depth (the solid slab under a face) and corner radius, per kind of element.
+export const edge = {
+  cta: { depth: 5, radius: 18 },
+  tile: { depth: 5, radius: 18 },
+  chip: { depth: 5, radius: 16 },
+  path: { depth: 6, radius: 20 },
+  banner: { depth: 6, radius: 18 },
+  card: { depth: 4, radius: 16 },
+  stat: { depth: 3, radius: 12 },
+  topButton: { depth: 4, radius: 14 },
 };
 
 // The small level words: 12 dp, extra bold, letter-spaced.

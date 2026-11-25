@@ -6,6 +6,7 @@ import { space, tokens } from "../../theme";
 import AppText from "./AppText";
 import { useFoxReact, useFoxReaction } from "./FoxContext";
 import { useReducedMotion } from "./motion";
+import { PATH_TILE, currentKey } from "./Rock";
 
 // The fox's head peeking over the current step's ring (Home). She is calm: she breathes and blinks,
 // and that is all. She never hops. Tapping her still tells the fox brain, and the few words it gives
@@ -13,7 +14,14 @@ import { useReducedMotion } from "./motion";
 // - side: "left" / "right", the half of the screen she is on, so her bubble grows toward the middle
 const HEAD = require("../../assets/fox/fox-head-peek.png");
 
-export const PEEK = { width: 108, height: 95, tuck: 12 }; // tuck: how much of her sits behind the ring
+export const PEEK = { width: 108, height: 95, tuck: 12 }; // the artwork's size (tuck: the old, larger head's)
+
+// How big she is on a path (2026-11-12 path fixes, section 4): 68% of the current step's ring wide (60 on
+// the 88 ring), the artwork's own shape, and the bottom 15% of her hidden behind the ring.
+const HEAD_W = currentKey(PATH_TILE).ring.width * 0.68;
+const HEAD_H = (HEAD_W * PEEK.height) / PEEK.width;
+export const PATH_PEEK = { width: HEAD_W, height: HEAD_H, tuck: HEAD_H * 0.15 };
+const S = HEAD_W / PEEK.width; // the artwork's numbers (the eyelids') to hers
 
 const BREATH = 4400; // ms, one breath in and out
 export const BLINK = 7300; // ms, the blink pattern
@@ -38,7 +46,7 @@ export const LID = [
 ];
 export const OPEN = 0.0001; // an open lid: flat to nothing (a scale of exactly 0 can upset Android)
 
-// Where the eyelids go on the 108 x 95 head, from its top-left corner.
+// Where the eyelids go on the 108 x 95 artwork, from its top-left corner (drawn scaled by S).
 const LIDS = [32, 60.7];
 const LID_TOP = 54;
 const LID_W = 15;
@@ -101,7 +109,7 @@ export default function FoxPeek({ side = "right", quiet = false }) {
                 <Animated.View
                   key={left}
                   pointerEvents="none"
-                  style={[styles.lid, { left, transformOrigin: "top", transform: [{ scaleY: lid }] }]}
+                  style={[styles.lid, { left: left * S, transformOrigin: "top", transform: [{ scaleY: lid }] }]}
                 >
                   <Eyelid id={`fox-lid-${i}`} />
                 </Animated.View>
@@ -124,7 +132,7 @@ export default function FoxPeek({ side = "right", quiet = false }) {
 // A shut eyelid: an orange oval in the fox's fur colours, with the curved line of a closed eye.
 function Eyelid({ id }) {
   return (
-    <Svg width={LID_W} height={LID_H} viewBox={`0 0 ${LID_W} ${LID_H}`}>
+    <Svg width={LID_W * S} height={LID_H * S} viewBox={`0 0 ${LID_W} ${LID_H}`}>
       <Defs>
         <LinearGradient id={id} x1="0" y1="0" x2="0" y2="1">
           <Stop offset="0" stopColor="#F0930A" />
@@ -138,11 +146,11 @@ function Eyelid({ id }) {
 }
 
 const styles = StyleSheet.create({
-  box: { width: PEEK.width, height: PEEK.height },
-  head: { width: PEEK.width, height: PEEK.height },
-  lid: { position: "absolute", top: LID_TOP, width: LID_W, height: LID_H },
+  box: { width: PATH_PEEK.width, height: PATH_PEEK.height },
+  head: { width: PATH_PEEK.width, height: PATH_PEEK.height },
+  lid: { position: "absolute", top: LID_TOP * S, width: LID_W * S, height: LID_H * S },
 
-  bubbleBox: { position: "absolute", bottom: PEEK.height + 4, width: 190 },
+  bubbleBox: { position: "absolute", bottom: PATH_PEEK.height + 4, width: 190 },
   bubbleLeft: { left: 0, alignItems: "flex-start" },
   bubbleRight: { right: 0, alignItems: "flex-end" },
   bubble: {

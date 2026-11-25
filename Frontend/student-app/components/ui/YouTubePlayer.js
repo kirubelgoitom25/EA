@@ -174,7 +174,7 @@ const styles = StyleSheet.create({
   playerLoading: { backgroundColor: BONE },
   hidden: { opacity: 0 },
   fallbackWrap: { gap: space.sm },
-  thumb: { ...StyleSheet.absoluteFillObject, opacity: 0.85 },
+  thumb: { ...StyleSheet.absoluteFill, opacity: 0.85 },
   play: {
     width: 64,
     height: 64,

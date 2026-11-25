@@ -4,6 +4,8 @@ import * as Haptics from "expo-haptics";
 import { Platform } from "react-native";
 import { createAudioPlayer, setAudioModeAsync } from "expo-audio";
 
+import { STAT_RAMP } from "./hapticPatterns";
+
 // Central sound + haptic feedback. Screens only call `feedback.xxx()`.
 // Everything here is best-effort: any failure is swallowed so it can never
 // affect quiz/practice behaviour.
@@ -12,9 +14,20 @@ const STORAGE_KEY = "ea.feedback.settings.v1";
 const MIN_GAP_MS = 60; // ignore the same sound re-triggered within this window
 const LIGHT_HAPTIC_GAP_MS = 40;
 const BUTTON_HAPTIC_STYLE = Haptics.ImpactFeedbackStyle.Soft;
+const RISE_STYLES = {
+  soft: Haptics.ImpactFeedbackStyle.Soft,
+  medium: Haptics.ImpactFeedbackStyle.Medium,
+  heavy: Haptics.ImpactFeedbackStyle.Heavy,
+};
 
 const SOURCES = {
-  correct: require("../assets/sounds/correct.wav"),
+  // 2026-11-13: built from measurements of a Duolingo screen recording (notes, timing, envelope), original audio
+  correct: require("../assets/sounds/correct_chime.wav"), // two notes, F#6 then A#6
+  correctBubble: require("../assets/sounds/correct_bubble.wav"), // the bubble pop, kept to compare in the Feel Lab
+  correctOld: require("../assets/sounds/correct.wav"), // the original, kept to compare in the Feel Lab
+  stat1: require("../assets/sounds/stat_1.wav"), // result cards, in order: F#5, A#5, F#6
+  stat2: require("../assets/sounds/stat_2.wav"),
+  stat3: require("../assets/sounds/stat_3.wav"),
   wrong: require("../assets/sounds/wrong.wav"),
   button: require("../assets/sounds/button.wav"),
   xp: require("../assets/sounds/xp.wav"),
@@ -170,6 +183,13 @@ export const haptic = {
 
     impact(BUTTON_HAPTIC_STYLE);
   },
+
+  // Beat number `order` (0, 1, 2...) of a rising run: each one a little stronger than the last.
+  rise(order = 0) {
+    if (Platform.OS === "web" || !settings.haptics) return;
+    const style = STAT_RAMP[Math.min(Math.max(order, 0), STAT_RAMP.length - 1)];
+    impact(RISE_STYLES[style]);
+  },
 };
 
 export const feedback = {
@@ -181,6 +201,16 @@ export const feedback = {
   wrong() {
     playSound("wrong");
     notify(Haptics.NotificationFeedbackType.Error);
+  },
+
+  // Plays any named sound once (for the Feel Lab). Still obeys the Sound switch.
+  sample(name) {
+    playSound(name);
+  },
+
+  // The pop of result card number `order` (0, 1, 2): each one higher than the last.
+  stat(order = 0) {
+    playSound(`stat${Math.min(Math.max(order, 0), 2) + 1}`);
   },
 
   button() {

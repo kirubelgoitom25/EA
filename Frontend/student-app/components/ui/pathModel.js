@@ -20,14 +20,60 @@ export const FOX_ROOM = 60; // extra room over the current step when the fox sta
 export const PEEK_ROOM = 84; // room over a first step that has the fox's head peeking over it
 export const PEEK_PART = 40; // more room for a part's dome when the fox's head is peeking right under it
 
-// The zigzag (Home): every step the same size, odd chapters on the left and even ones on the right,
-// at x = 96 and 284 on a 390 wide screen (scaled on others), about 125 between them with a little
-// more around the step you are at.
-export const ZIG = { left: 96 / 390, right: 284 / 390, row: 125, aboveNext: 25, belowNext: 11 };
+// The trail (every path screen; 2026-11-11 handoff 5a, positions from the 2026-11-12 path fixes): tiles
+// zig-zag through four spots, x = 96, 270, 150, 280 on a 390 wide screen, then again. Every step sits on
+// the other side from the one before it, including where the cycle wraps (280 back to 96), so every
+// stretch of road sweeps across the screen (the smallest sideways move is 120). The rows step down 105
+// to 140 dp. Everything is laid out on the 390 wide reference and scaled with the screen's width, like
+// the background tile behind it. Two kinds of path:
+// - course: a path of chapters (Home and a course page); first tile at 74 under the scenery's top
+// - chapter: a path of lessons, two-line labels, so a little more room; first tile at 88
+export const REF_WIDTH = 390;
+export const TRAIL_X = [96, 270, 150, 280];
+export const TRAIL = {
+  course: { first: 74, row: 105, aboveNext: 27, belowNext: 23, den: 140, end: 70 },
+  chapter: { first: 88, row: 120, aboveNext: 22, belowNext: 18, den: 140, end: 70 },
+};
+export const FIRST_FOX = 60; // more room over a first step that is the current one, for the fox's head
+// kept for the older tests and callers: the course trail's rows
+export const ZIG = TRAIL.course;
 
-// x of a chapter numbered `number` in the zigzag. `frame` is the screen's width; the path itself is
-// `width` wide and centred in it.
-export const zigX = (number, width, frame = width) => frame * (number % 2 ? ZIG.left : ZIG.right) - (frame - width) / 2;
+// x of a step numbered `number` (1, 2, ...) on the trail. `frame` is the screen's width; the path itself
+// is `width` wide and centred in it.
+export const zigX = (number, width, frame = width) => {
+  const n = TRAIL_X.length;
+  const spot = TRAIL_X[(((Math.round(number) - 1) % n) + n) % n];
+  return (frame * spot) / REF_WIDTH - (frame - width) / 2;
+};
+
+const trailOf = (zig) => TRAIL[typeof zig === "string" ? zig : "course"];
+
+// The trail's rows: centers[i] the y of step i's middle, den its end, total the path's height.
+function layoutTrail(items, foxAbove, zig, frame) {
+  const t = trailOf(zig);
+  const s = frame / REF_WIDTH;
+  const centers = [];
+  let lead = 0; // extra room over the first step (its dome, the fox's head): the artwork moves down by it too
+  items.forEach((item, i) => {
+    const part = item.eyebrow ? PART : 0;
+    if (i === 0) {
+      lead = (part + (item.status === "next" && foxAbove ? FIRST_FOX : 0)) * s;
+      centers.push(t.first * s + lead);
+      return;
+    }
+    const gap = t.row + part + (item.status === "next" ? t.aboveNext : 0) + (items[i - 1].status === "next" ? t.belowNext : 0);
+    centers.push(centers[i - 1] + gap * s);
+  });
+  const last = centers.length ? centers[centers.length - 1] : 0;
+  const denCenter = last + t.den * s;
+  return {
+    offsets: centers.map((c) => c - NODE_TOP),
+    centers,
+    den: { top: denCenter - 24, center: denCenter },
+    total: denCenter + t.end * s,
+    lead,
+  };
+}
 
 const extraAbove = (item, cta, foxAbove, zig = false, first = false) => {
   const next = item.status === "next";
@@ -44,7 +90,8 @@ export const rowHeight = (item, cta, foxAbove = false, zig = false, first = fals
 // rock's middle; den is the end of the path. total is the height of the whole path.
 // foxAbove: the fox is on top of the current step (Home), so its row has room for her.
 // zig: the zigzag rows (Home).
-export function layoutPath(items, cta = true, foxAbove = false, zig = false) {
+export function layoutPath(items, cta = true, foxAbove = false, zig = false, frame = REF_WIDTH) {
+  if (zig) return layoutTrail(items, foxAbove, zig, frame);
   let y = 0;
   const offsets = [];
   const centers = [];
@@ -57,9 +104,10 @@ export function layoutPath(items, cta = true, foxAbove = false, zig = false) {
 }
 
 // Points the path passes through: every step's rock, then the den's.
-// zig: { frame } for the zigzag (Home), frame being the screen's width; steps sit by their number.
+// zig: { frame, trail } for the trail, frame being the screen's width and trail "course" | "chapter";
+// steps sit by their number.
 export function pathPoints(items, hasDen, width, cta = true, foxAbove = false, zig = null) {
-  const layout = layoutPath(items, cta, foxAbove, !!zig);
+  const layout = layoutPath(items, cta, foxAbove, zig ? zig.trail ?? "course" : false, zig?.frame ?? REF_WIDTH);
   const numberOf = (i) => items[i]?.number ?? (items[0]?.number ?? 1) + i;
   const x = (i) => (zig ? zigX(numberOf(i), width, zig.frame) : xOf(i, width));
   const points = layout.centers.map((y, i) => ({ x: x(i), y }));
@@ -148,3 +196,48 @@ export function travelled(items, den) {
   }
   return den?.reached ? items.length : last;
 }
+
+// The trail's road (2026-11-12 path fixes, section 3): separate round dots, never a dashed stroke. Along
+// each stretch (the "s" curve from one step's middle to the next one's) a dot every ROAD.step dp, the
+// first ROAD.start in. Distance is measured along the curve itself (sampled finely and added up), not by
+// the Bezier's parameter, so the dots do not bunch up on the bends. A dot whose middle falls inside
+// either end's box is left out, so none pokes out from behind a tile.
+// boxes[i]: { left, top, right, bottom } around point i (see roadBox), or null for no box; also: more
+// boxes anywhere on the path (a part's dome sitting halfway along a stretch), kept clear the same way.
+// Returns [{ x, y, seg }], seg being the stretch the dot is on (from point seg to seg + 1).
+export const ROAD = { radius: 4.5, step: 18, start: 9, pad: 3, padBelow: 9 };
+const ROAD_SAMPLES = 160;
+
+const inside = (box, pt) => !!box && pt.x >= box.left && pt.x <= box.right && pt.y >= box.top && pt.y <= box.bottom;
+
+export function roadDots(points, boxes = [], also = []) {
+  const dots = [];
+  for (let i = 0; i < points.length - 1; i += 1) {
+    const piece = segment(points, i, "s");
+    let prev = piece[0];
+    let walked = 0;
+    let want = ROAD.start;
+    for (let s = 1; s <= ROAD_SAMPLES; s += 1) {
+      const pt = bezierPoint(piece, s / ROAD_SAMPLES);
+      const run = Math.hypot(pt.x - prev.x, pt.y - prev.y);
+      while (run > 0 && walked + run >= want) {
+        const t = (want - walked) / run;
+        const dot = { x: prev.x + (pt.x - prev.x) * t, y: prev.y + (pt.y - prev.y) * t, seg: i };
+        if (!inside(boxes[i], dot) && !inside(boxes[i + 1], dot) && !also.some((box) => inside(box, dot))) dots.push(dot);
+        want += ROAD.step;
+      }
+      walked += run;
+      prev = pt;
+    }
+  }
+  return dots;
+}
+
+// The box the road keeps out of around a thing at (x, y): `half` either side, `top` above and `bottom`
+// below its point, grown by ROAD.pad all round and by ROAD.padBelow underneath (a tile's bottom edge).
+export const roadBox = (x, y, half, top, bottom) => ({
+  left: x - half - ROAD.pad,
+  right: x + half + ROAD.pad,
+  top: y - top - ROAD.pad,
+  bottom: y + bottom + ROAD.padBelow,
+});

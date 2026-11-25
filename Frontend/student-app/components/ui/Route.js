@@ -1,19 +1,21 @@
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Animated, Easing, Pressable, StyleSheet, View, useWindowDimensions } from "react-native";
-import Svg, { Path } from "react-native-svg";
+import Svg, { Circle, Path } from "react-native-svg";
 
-import { layout, space, stone, tokens } from "../../theme";
+import { fonts, layout, space, tokens, ui } from "../../theme";
 import AppText from "./AppText";
 import DriftingLine from "./DriftingLine";
 import { Entrance } from "./anim";
 import Fox from "./Fox";
 import { FoxFigure, FoxHeadLean } from "./CourseFox";
-import FoxPeek, { CSS_EASE, PEEK } from "./FoxPeek";
+import FoxPeek, { CSS_EASE, PATH_PEEK } from "./FoxPeek";
 import { TITLE_FOX, placeEdgeFox, placeTitleFox, scaleOf } from "./foxPlacement";
 import { useReducedMotion } from "./motion";
-import { layoutPath, pathD, pathLength, pathPoints, pointAt, travelled, wordsSide } from "./pathModel";
+import { ROAD, layoutPath, pathD, pathLength, pathPoints, pointAt, roadBox, roadDots, travelled, wordsSide } from "./pathModel";
 import { ADVANCE, ARRIVAL, SCREEN, advanceOf, burstDelay, newlyDone } from "./pathMotionModel";
-import Rock, { Dome, ROCKS, ringTop, rockBox } from "./Rock";
+import Rock, { Dome, LIP, PATH_TILE, ROCKS, currentKey, ringTop, rockBox } from "./Rock";
+import PressLip from "./PressLip";
+import { Cloud, PathBackdrop } from "./Scenery";
 import Sparkle from "./Sparkle";
 import StepMorph, { win } from "./StepMorph";
 
@@ -70,17 +72,63 @@ const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 const ICONS = { video: "play", reading: "document-text", questions: "help" };
 const NAMES = { video: "Video", reading: "Reading", questions: "Questions" };
 
-const ROCK = { done: 84, next: 84, todo: 84 };
-const DOT = 5; // how big the dots of the path are
+const ROCK = { done: PATH_TILE, next: PATH_TILE, todo: PATH_TILE };
+const RING_HALF = (PATH_TILE * 108) / 84 / 2; // half the current step's ring (the ring is 108 at 84)
+const LABEL_GAP = 14; // from a tile (or the current step's ring) to its words
+const DEN_SIZE = 96;
+const DOT = 9; // how big the dots of the path are
 const DOTTED = "0.1 12";
-const DASHED = "2 12"; // the zigzag's line: 2 dp dashes, 12 dp apart, with round ends
+const DASHED = "1 17"; // the trail's line: dash 1, gap 17, round caps: round dots 18 dp apart
 const FOX = 68;
+
 const FOX_BOX = 92;
 const DEN_TOP = 38; // from the den's point up to the top of its dome
+const DEN_ARC = DEN_SIZE * 0.08; // from the top of the den's picture down to the top of its arch
+
+// What the trail's road keeps clear of around each point (pathModel's roadBox): a tile and its bottom
+// edge, the current step's ring, the den's dome.
+const RING = currentKey(PATH_TILE).ring.height;
+const TILE_HALF = PATH_TILE / 2 + LIP / 2; // from a tile's middle to its top, or to the bottom of its edge
+function roadBoxes(items, points, hasDen) {
+  const boxes = items.map((item, i) => {
+    const { x, y } = points[i];
+    if (item.status === "next") return roadBox(x, y, RING / 2, -ringTop(PATH_TILE), RING + ringTop(PATH_TILE));
+    return roadBox(x, y, PATH_TILE / 2, TILE_HALF, TILE_HALF);
+  });
+  if (hasDen && points[items.length]) {
+    const { x, y } = points[items.length];
+    boxes.push(roadBox(x, y, DEN_SIZE * 0.42, DEN_TOP - DEN_ARC, DEN_SIZE * 0.72 - DEN_TOP));
+  }
+  return boxes;
+}
+
+// The small domes between two parts of a course, halfway along their stretch (56 wide, drawn from 23 above
+// their point): their arch and edge, as roadBox boxes.
+function domeBoxes(items, points) {
+  return items.flatMap((item, i) => {
+    if (!item.eyebrow || i === 0) return [];
+    const { x, y } = pointAt(points, i - 0.5, "s");
+    return [roadBox(x, y, 56 * 0.42, 23 - 56 * 0.08, 56 * 0.72 - 23)];
+  });
+}
+
+// The trail's road as round dots, each coloured by colorOf(its stretch) (null leaves it out). top: the
+// drawing starts that far down the path.
+function RoadDots({ dots, colorOf, width, height, top = 0 }) {
+  return (
+    <Svg width={width} height={height} style={{ position: "absolute", left: 0, top: 0 }} pointerEvents="none">
+      {dots.map((dot) => {
+        const fill = colorOf(dot.seg);
+        return fill ? <Circle key={`${dot.x.toFixed(1)},${dot.y.toFixed(1)}`} cx={dot.x} cy={dot.y - top} r={ROAD.radius} fill={fill} /> : null;
+      })}
+    </Svg>
+  );
+}
 
 // Re-exported for screens that scroll to a step: offsets[i] is the top of step i, centers[i] its rock.
-export function routeMetrics(items, cta = true, foxAbove = true, zigzag = true) {
-  return layoutPath(items, cta, foxAbove, zigzag);
+// trail: "course" | "chapter"; frame: the screen's width (the same numbers the Route lays itself out with).
+export function routeMetrics(items, cta = true, foxAbove = true, zigzag = true, trail = "course", frame = 390) {
+  return layoutPath(items, cta, foxAbove, zigzag ? trail : false, frame);
 }
 
 // Where the fox stood on each path last time it was drawn (kept while the app runs).
@@ -88,9 +136,9 @@ const lastStop = {};
 
 // scrollY / viewHeight (optional): where the screen is, in the route's own coordinates, so only the
 // part of the drifting line near the screen moves (see DriftingLine).
-export default function Route({ items, den, onPress, cta = true, foxKey, fox = true, words = true, foxPlace = "above", zigzag = true, mascot = null, arrival = null, scrollY = null, viewHeight = null, exit = null, entry = null, advanceLead = null, style }) {
+export default function Route({ items, den, onPress, cta = true, foxKey, fox = true, words = true, foxPlace = "above", zigzag = true, mascot = null, arrival = null, scrollY = null, viewHeight = null, exit = null, entry = null, advanceLead = null, scenery = false, trail = "course", cloud = null, style }) {
   const reduce = useReducedMotion();
-  const { width: screenWidth } = useWindowDimensions();
+  const { width: screenWidth, height: screenHeight } = useWindowDimensions();
   const [measured, setMeasured] = useState(null);
   const [callout, setCallout] = useState(null); // { kind: "step" | "dome" | "den", index }
   // What moved on since this path was last shown plays once, as an advance (what advanceOf found, with
@@ -119,11 +167,14 @@ export default function Route({ items, den, onPress, cta = true, foxKey, fox = t
   const report = useMemo(() => (seen ? (key, rect) => setRects((now) => (sameRect(now[key], rect) ? now : { ...now, [key]: rect })) : null), [seen]);
 
   const n = items.length;
-  const { layout: rows, points } = pathPoints(items, !!den, width, cta, above, zigzag ? { frame: screenWidth } : null);
+  const { layout: rows, points } = pathPoints(items, !!den, width, cta, above, zigzag ? { frame: screenWidth, trail } : null);
   const curve = zigzag ? "s" : "spline";
   const dash = zigzag ? DASHED : DOTTED;
   const reached = travelled(items, den);
   const last = advance ? Math.min(advance.lastFrom, reached) : reached;
+  // the trail's road: its dots, worked out again only when the steps move or change
+  const roadKey = zigzag ? `${points.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(";")}|${items.map((item) => `${item.status}${item.eyebrow ? "^" : ""}`).join()}` : null;
+  const road = useMemo(() => (zigzag ? roadDots(points, roadBoxes(items, points, !!den), domeBoxes(items, points)) : null), [roadKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const nextAt = items.findIndex((item) => item.status === "next");
   // The fox stands at the step you are at, or at the den once nothing is left.
@@ -167,7 +218,8 @@ export default function Route({ items, den, onPress, cta = true, foxKey, fox = t
       const at = points[i];
       const c = rows.centers[i];
       // the tile with its lip, and the current one's ring
-      obstacles.push(item.status === "next" ? { x: at.x - 54, y: c - 57, w: 108, h: 114 } : { x: at.x - 42, y: c - 42, w: 84, h: 90 });
+      const half = ROCK[item.status] / 2;
+      obstacles.push(item.status === "next" ? { x: at.x - RING_HALF, y: c - RING_HALF - 2, w: RING_HALF * 2, h: RING_HALF * 2 + 6 } : { x: at.x - half, y: c - half, w: half * 2, h: half * 2 + 6 });
       if (rects[`tag-${i}`]) obstacles.push(rects[`tag-${i}`]);
       if (item.eyebrow && i > 0) {
         const dome = pointAt(points, i - 0.5, curve);
@@ -175,7 +227,7 @@ export default function Route({ items, den, onPress, cta = true, foxKey, fox = t
         if (rects[`part-${i}`]) obstacles.push(rects[`part-${i}`]);
       }
     });
-    if (den) obstacles.push({ x: points[n].x - 46, y: points[n].y - 38, w: 92, h: 80 });
+    if (den) obstacles.push({ x: points[n].x - DEN_SIZE / 2, y: points[n].y - DEN_TOP, w: DEN_SIZE, h: 80 });
     if (words.button) obstacles.push(words.button);
     if (mascot === "title") {
       return placeTitleFox({ title: { lines: words.lines }, kicker: words.kicker, obstacles, bounds: { left: -off, right: width + off }, k });
@@ -294,10 +346,25 @@ export default function Route({ items, den, onPress, cta = true, foxKey, fox = t
 
   return (
     <View style={[{ height: rows.total }, style]} onLayout={(event) => setMeasured(Math.round(event.nativeEvent.layout.width))}>
+      {/* the seamless background tile behind the path, from the screen's left edge to its right, repeated
+          from the path's top to well past its end */}
+      {scenery ? <PathBackdrop width={screenWidth + 2} height={rows.total} below={screenHeight} style={{ left: -off - 1 }} /> : null}
+      {/* cloud: { x, y } on the 390 wide reference, from the screen's left edge and the path's top */}
+      {cloud ? <Cloud x={(cloud.x * screenWidth) / 390 - off} y={(cloud.y * screenWidth) / 390} /> : null}
       <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, looks?.lineClip, entryLine?.clip, exitLooks?.line]}>
       <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, looks?.lineHold, entryLine?.hold]}>
       {/* the dotted path: stone grey all the way, with the moss-green dots over the part you have done */}
-      {points.length > 1 && lineMotion === "title" ? (
+      {/* the trail's road: round dots, moss green before the current step and white from it on; with the
+          glow, the piece into the current step is left to the glow below */}
+      {road ? (
+        <RoadDots
+          dots={road}
+          width={width}
+          height={rows.total}
+          colorOf={(seg) => (pulse && seg === last - 1 ? null : seg < last ? ui.lineDone : ui.lineAhead)}
+        />
+      ) : null}
+      {!road && points.length > 1 && lineMotion === "title" ? (
         // the dots drift forward along the whole line, one gap every 2.8 s: stone grey all the way,
         // moss green over the part you have done. Dash views moved on the UI thread (DriftingLine).
         <DriftingLine
@@ -307,27 +374,27 @@ export default function Route({ items, den, onPress, cta = true, foxKey, fox = t
           height={rows.total}
           dash={dash}
           thickness={DOT}
-          lineColor={stone.line}
-          doneColor={stone.moss}
+          lineColor={ui.lineAhead}
+          doneColor={ui.lineDone}
           duration={FLOW}
           scrollY={scrollY}
           viewHeight={viewHeight}
         />
       ) : null}
-      {points.length > 1 && lineMotion !== "title" ? (
+      {points.length > 1 && (road ? spark : lineMotion !== "title") ? (
         <Svg width={width} height={rows.total} style={StyleSheet.absoluteFill} pointerEvents="none">
           {(
             <>
               {/* with the glow, the grey starts at the current step (so none shows through the glowing
                   piece), its dots in step with the line from the start */}
-              {pulse ? (
+              {road ? null : pulse ? (
                 last < points.length - 1 ? (
-                  <Path d={pathD(points, last, points.length - 1, curve)} stroke={stone.line} strokeDashoffset={dashPhase(points, last, curve, dash)} {...dashed} />
+                  <Path d={pathD(points, last, points.length - 1, curve)} stroke={ui.lineAhead} strokeDashoffset={dashPhase(points, last, curve, dash)} {...dashed} />
                 ) : null
               ) : (
-                <Path d={pathD(points, 0, points.length - 1, curve)} stroke={stone.line} {...dashed} />
+                <Path d={pathD(points, 0, points.length - 1, curve)} stroke={ui.lineAhead} {...dashed} />
               )}
-              {last > 0 && !(pulse && last === 1) ? <Path d={pathD(points, 0, pulse ? last - 1 : last, curve)} stroke={stone.moss} {...dashed} /> : null}
+              {!road && last > 0 && !(pulse && last === 1) ? <Path d={pathD(points, 0, pulse ? last - 1 : last, curve)} stroke={ui.lineDone} {...dashed} /> : null}
             </>
           )}
           {spark ? (
@@ -348,13 +415,17 @@ export default function Route({ items, den, onPress, cta = true, foxKey, fox = t
       {pulse ? (
         // the piece of line into the current step, fading 50% .. 100% and back every 3.6 s
         <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, { opacity: glow }]}>
-          <Svg width={width} height={rows.total}>
-            <Path d={pathD(points, last - 1, last, curve)} stroke={stone.moss} strokeDashoffset={dashPhase(points, last - 1, curve, dash)} {...dashed} />
-          </Svg>
+          {road ? (
+            <RoadDots dots={road} width={width} height={rows.total} colorOf={(seg) => (seg === last - 1 ? ui.lineDone : null)} />
+          ) : (
+            <Svg width={width} height={rows.total}>
+              <Path d={pathD(points, last - 1, last, curve)} stroke={ui.lineDone} strokeDashoffset={dashPhase(points, last - 1, curve, dash)} {...dashed} />
+            </Svg>
+          )}
         </Animated.View>
       ) : null}
       {advance && advance.lastTo > advance.lastFrom ? (
-        <LineFill points={points} from={advance.lastFrom} to={advance.lastTo} curve={curve} dash={dash} dashed={dashed} width={width} height={rows.total} clock={advance.clock} />
+        <LineFill road={road} points={points} from={advance.lastFrom} to={advance.lastTo} curve={curve} dash={dash} dashed={dashed} width={width} height={rows.total} clock={advance.clock} />
       ) : null}
       </Animated.View>
       </Animated.View>
@@ -386,18 +457,20 @@ export default function Route({ items, den, onPress, cta = true, foxKey, fox = t
             onPress={() => toggle({ kind: "dome", index: i })}
             accessible={false}
             importantForAccessibility="no"
-            style={[styles.partName, { top: at.y - 12 }, toTheRight ? { left: at.x + 38, right: 0 } : { left: 0, right: width - at.x + 38, alignItems: "flex-end" }, looks?.label(i), scenes(i - 0.5)]}
+            style={[styles.partName, { top: at.y - 14 }, toTheRight ? { left: at.x + 34, right: 0, alignItems: "flex-start" } : { left: 0, right: width - at.x + 34, alignItems: "flex-end" }, looks?.label(i), scenes(i - 0.5)]}
           >
-            <MeasuredText
-              variant="label"
-              tone="secondary"
-              numberOfLines={1}
-              onRect={report && (({ rect }) => report(`part-${i}`, rect))}
-              originX={toTheRight ? at.x + 38 : 0}
-              originY={at.y - 12}
-            >
-              {item.eyebrow}
-            </MeasuredText>
+            <View style={styles.partPill}>
+              <MeasuredText
+                variant="label"
+                tone="secondary"
+                numberOfLines={1}
+                onRect={report && (({ rect }) => report(`part-${i}`, { ...rect, x: rect.x - 10, w: rect.w + 20, y: rect.y - 3, h: rect.h + 6 }))}
+                originX={toTheRight ? at.x + 44 : 0}
+                originY={at.y - 11}
+              >
+                {item.eyebrow}
+              </MeasuredText>
+            </View>
           </AnimatedPressable>
           </React.Fragment>
         );
@@ -458,23 +531,46 @@ export default function Route({ items, den, onPress, cta = true, foxKey, fox = t
           hitSlop={space.md}
           accessibilityRole="button"
           accessibilityLabel={`${den.title}. ${den.caption}`}
-          style={[styles.pinned, { left: points[n].x - 46, top: points[n].y - 38 }]}
+          style={[styles.pinned, { left: points[n].x - DEN_SIZE / 2, top: points[n].y - DEN_TOP }]}
         >
           <Animated.View style={looks?.rise(n)}>
           <Animated.View style={denLook}>
             {denLit ? (
               <Animated.View style={denLit.pop}>
-                <Dome size={92} lit={false} />
+                <Dome size={DEN_SIZE} lit={false} />
                 <Animated.View style={[StyleSheet.absoluteFill, denLit.light]}>
-                  <Dome size={92} lit />
+                  <Dome size={DEN_SIZE} lit />
                 </Animated.View>
               </Animated.View>
             ) : (
-              <Dome size={92} lit={!!den.reached} />
+              <Dome size={DEN_SIZE} lit={!!den.reached} />
             )}
           </Animated.View>
           </Animated.View>
         </Pressable>
+      ) : null}
+
+      {den?.eyebrow && words ? (
+        <AnimatedPressable
+          onPress={() => toggle({ kind: "den", index: n })}
+          accessible={false}
+          importantForAccessibility="no"
+          style={[
+            styles.label,
+            { top: points[n].y - 22, height: 44 },
+            points[n].x < width / 2
+              ? { left: points[n].x + DEN_SIZE / 2 + LABEL_GAP, right: -off }
+              : { left: -off, right: width - points[n].x + DEN_SIZE / 2 + LABEL_GAP, alignItems: "flex-end" },
+            denLook,
+          ]}
+        >
+          <AppText style={[styles.labelEyebrow, { color: den.reached ? ui.done.ink : ui.textMuted }]} numberOfLines={1}>
+            {den.eyebrow}
+          </AppText>
+          <AppText style={[styles.labelTitle, { color: den.reached ? tokens.text : ui.textSecondary }]} numberOfLines={1}>
+            {den.title}
+          </AppText>
+        </AnimatedPressable>
       ) : null}
 
       {fox && !above && !mascot && foxAt >= 0 ? <FoxMarker foxKey={foxKey} index={foxAt} count={n} points={points} curve={curve} width={width} reduce={reduce} /> : null}
@@ -528,7 +624,8 @@ function Step({ item, index, width, x, center, cta, words, zigzag, onPress, onNo
   );
 
   const press = () => onPress?.(index);
-  const reach = size * 0.55 + 28;
+  const reach = (next ? RING_HALF : size / 2) + LABEL_GAP;
+  const edgeRoom = 12; // words may run into the path's side margin, up to 12 dp from the screen's edge
   const tag = item.tag ?? NAMES[item.type];
   // Where the current step's words box starts, and (once laid out) the block of kicker and title in it.
   const wordsLeft = side === "right" ? x + reach : 0;
@@ -565,24 +662,42 @@ function Step({ item, index, width, x, center, cta, words, zigzag, onPress, onNo
           accessible={false}
           importantForAccessibility="no"
           style={[
-            styles.tag,
-            { top: center - 11 },
-            side === "right" ? { left: x + reach - 4, right: 0 } : { left: 0, right: width - x + reach - 4, alignItems: "flex-end" },
+            styles.label,
+            item.label ? { top: center - 22, height: 44 } : { top: center - 11, height: 22 },
+            side === "right" ? { left: x + reach, right: -edgeRoom } : { left: -edgeRoom, right: width - x + reach, alignItems: "flex-end" },
             looks?.label(index),
             advanceLooks.tag,
             scene,
           ]}
         >
-          <MeasuredText
-            variant="label"
-            tone={done ? "tertiary" : "secondary"}
-            numberOfLines={1}
-            onRect={report && (({ rect }) => report(`tag-${index}`, rect))}
-            originX={side === "right" ? x + reach - 4 : 0}
-            originY={center - 11}
-          >
-            {tag}
-          </MeasuredText>
+          {item.label ? (
+            // a path of lessons: a small eyebrow ("LESSON 2") over the bold title, on one line each
+            <>
+              <AppText style={[styles.labelEyebrow, { color: item.status === "todo" ? ui.textMuted : ui.done.ink }]} numberOfLines={1}>
+                {item.label.toUpperCase()}
+              </AppText>
+              <MeasuredText
+                style={[styles.labelTitle, { color: item.status === "todo" ? ui.textSecondary : tokens.text, textAlign: side === "right" ? "left" : "right" }]}
+                numberOfLines={1}
+                onRect={report && (({ rect }) => report(`tag-${index}`, rect))}
+                originX={side === "right" ? x + reach : 0}
+                originY={center - 22}
+              >
+                {item.title}
+              </MeasuredText>
+            </>
+          ) : (
+            // a path of chapters: just its name ("Chapter 14")
+            <MeasuredText
+              style={styles.tagText}
+              numberOfLines={1}
+              onRect={report && (({ rect }) => report(`tag-${index}`, rect))}
+              originX={side === "right" ? x + reach : 0}
+              originY={center - 11}
+            >
+              {tag}
+            </MeasuredText>
+          )}
         </AnimatedPressable>
       ) : null}
 
@@ -616,10 +731,8 @@ function Step({ item, index, width, x, center, cta, words, zigzag, onPress, onNo
           >
             {words && item.kicker ? (
               <MeasuredText
-                variant="overline"
-                tone="accent"
                 numberOfLines={1}
-                style={{ textAlign: side === "right" ? "left" : "right" }}
+                style={[styles.labelEyebrow, { color: ui.done.ink, textAlign: side === "right" ? "left" : "right" }]}
                 onRect={report && next ? ({ rect }) => report(`kicker-${index}`, rect) : null}
                 ready={!!block}
                 originX={blockX}
@@ -630,8 +743,7 @@ function Step({ item, index, width, x, center, cta, words, zigzag, onPress, onNo
             ) : null}
             {words ? (
               <MeasuredText
-                variant="title"
-                numberOfLines={3}
+                numberOfLines={2}
                 style={[styles.nextTitle, { textAlign: side === "right" ? "left" : "right" }]}
                 onRect={report && next ? ({ lines }) => report(`title-${index}`, lines) : null}
                 ready={!!block}
@@ -722,7 +834,7 @@ function iconOf(type, status) {
 // The piece of line an advance fills, from the step that was current to the new one: the travelled
 // colour, drawn on from the top over ADVANCE.line. A clip box slides down while the line inside slides
 // up by as much, so it stays put and the whole thing runs on the native driver.
-function LineFill({ points, from, to, curve, dash, dashed, width, height, clock }) {
+function LineFill({ road, points, from, to, curve, dash, dashed, width, height, clock }) {
   const along = Array.from({ length: 17 }, (_, i) => pointAt(points, from + ((to - from) * i) / 16, curve));
   const top = Math.min(...along.map((pt) => pt.y)) - DOT;
   const span = Math.max(...along.map((pt) => pt.y)) + DOT - top;
@@ -734,11 +846,15 @@ function LineFill({ points, from, to, curve, dash, dashed, width, height, clock 
   return (
     <Animated.View pointerEvents="none" style={[{ position: "absolute", left: 0, top, width, height: span, overflow: "hidden" }, slide.clip]}>
       <Animated.View style={slide.hold}>
-        <Svg width={width} height={height} style={{ position: "absolute", top: -top }}>
-          {/* a band of the ground under it hides the grey dots there (they may drift out of step) */}
-          <Path d={pathD(points, from, to, curve)} stroke={stone.bg} strokeWidth={DOT + 3} strokeLinecap="round" fill="none" />
-          <Path d={pathD(points, from, to, curve)} stroke={stone.moss} strokeDashoffset={dashPhase(points, from, curve, dash)} {...dashed} />
-        </Svg>
+        {road ? (
+          <View style={{ position: "absolute", top: -top, width, height }}>
+            <RoadDots dots={road} width={width} height={height} colorOf={(seg) => (seg >= from && seg < to ? ui.lineDone : null)} />
+          </View>
+        ) : (
+          <Svg width={width} height={height} style={{ position: "absolute", top: -top }}>
+            <Path d={pathD(points, from, to, curve)} stroke={ui.lineDone} strokeDashoffset={dashPhase(points, from, curve, dash)} {...dashed} />
+          </Svg>
+        )}
       </Animated.View>
     </Animated.View>
   );
@@ -796,11 +912,11 @@ function Callout({ note, width, total }) {
         </AppText>
       ) : null}
       {note.open ? (
-        <Pressable onPress={note.open} accessibilityRole="button" accessibilityLabel={note.button} style={({ pressed }) => [styles.calloutButton, pressed && styles.pressed]}>
+        <PressLip onPress={note.open} accessibilityLabel={note.button} lip={ui.primaryEdge} lipSize={4} radius={14} haptics style={styles.calloutButtonBox} faceStyle={styles.calloutButton}>
           <AppText variant="label" style={styles.calloutButtonText}>
             {note.button}
           </AppText>
-        </Pressable>
+        </PressLip>
       ) : null}
     </View>
   );
@@ -896,14 +1012,14 @@ function PeekMarker({ foxKey, index, count, points, curve, width, reduce, advanc
   );
 
   // from a stop's point to the top-left of her head
-  const dy = (k) => (k < count ? ringTop(ROCK.next) : -DEN_TOP) + PEEK.tuck - PEEK.height;
+  const dy = (k) => (k < count ? ringTop(ROCK.next) : -DEN_TOP + DEN_ARC) + PATH_PEEK.tuck - PATH_PEEK.height;
   const head = (k, motion, key) => {
     const at = points[Math.min(k, points.length - 1)];
     return (
       <Animated.View
         key={key}
         pointerEvents={motion?.leaving ? "none" : "box-none"}
-        style={[styles.peek, { transform: [{ translateX: at.x - PEEK.width / 2 }, { translateY: at.y + dy(k) }] }]}
+        style={[styles.peek, { transform: [{ translateX: at.x - PATH_PEEK.width / 2 }, { translateY: at.y + dy(k) }] }]}
       >
         <Animated.View pointerEvents="box-none" style={motion?.style}>
           <FoxPeek side={at.x < width / 2 ? "left" : "right"} quiet={!!motion?.leaving} />
@@ -1120,8 +1236,14 @@ const styles = StyleSheet.create({
 
   words: { position: "absolute" },
   tag: { position: "absolute", height: 22, justifyContent: "center" },
-  partName: { position: "absolute", height: 24, justifyContent: "center" },
-  nextTitle: { fontSize: 20, lineHeight: 25 },
+  label: { position: "absolute", justifyContent: "center" },
+  labelEyebrow: { fontFamily: fonts.display, fontSize: 10, lineHeight: 14, letterSpacing: 0.9 },
+  labelTitle: { fontFamily: fonts.display, fontSize: 14, lineHeight: 19 },
+  tagText: { fontFamily: fonts.display, fontSize: 13, lineHeight: 18, color: ui.textSecondary },
+  // a part's name sits on a soft pill of sky, so it reads cleanly over any pine of the artwork
+  partName: { position: "absolute", height: 28, justifyContent: "center" },
+  partPill: { paddingHorizontal: 10, paddingVertical: 3, borderRadius: 12, backgroundColor: "rgba(234,243,236,0.92)" },
+  nextTitle: { fontFamily: fonts.display, fontSize: 15, lineHeight: 20, color: tokens.text, marginTop: 2 },
   pressed: { opacity: 0.75 },
 
   bubbleBox: { position: "absolute", width: 140, alignItems: "center" },
@@ -1134,7 +1256,7 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: tokens.divider,
   },
-  bubbleText: { color: tokens.accentText, letterSpacing: 0.8 },
+  bubbleText: { fontFamily: fonts.display, fontSize: 13, color: ui.selected.ink, letterSpacing: 1.2 },
   bubbleTip: {
     width: 12,
     height: 12,
@@ -1165,17 +1287,15 @@ const styles = StyleSheet.create({
   sideTipRight: { right: -7, borderTopWidth: 2, borderRightWidth: 2 },
   calloutTip: { position: "absolute", width: 12, height: 12, backgroundColor: tokens.surface, transform: [{ rotate: "45deg" }] },
   calloutTag: { fontSize: 10, lineHeight: 14, letterSpacing: 1 },
+  calloutButtonBox: { alignSelf: "flex-start", marginTop: space.sm },
   calloutButton: {
-    alignSelf: "flex-start",
-    height: 34,
-    marginTop: space.sm,
+    height: 36,
     paddingHorizontal: space.lg,
     justifyContent: "center",
-    borderRadius: 17,
-    backgroundColor: tokens.text,
+    backgroundColor: ui.primary,
   },
-  calloutButtonText: { color: "#FFFFFF" },
+  calloutButtonText: { color: "#FFFFFF", fontFamily: fonts.display },
 
   fox: { position: "absolute", left: 0, top: 0, width: FOX_BOX, height: FOX_BOX, alignItems: "center", justifyContent: "center" },
-  peek: { position: "absolute", left: 0, top: 0, width: PEEK.width, height: PEEK.height },
+  peek: { position: "absolute", left: 0, top: 0, width: PATH_PEEK.width, height: PATH_PEEK.height },
 });

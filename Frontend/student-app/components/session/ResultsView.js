@@ -1,8 +1,12 @@
-import React from "react";
-import { StyleSheet, View } from "react-native";
+import React, { useEffect, useMemo, useRef } from "react";
+import { Animated, StyleSheet, View, useWindowDimensions } from "react-native";
 
-import { level, space, tokens, type } from "../../theme";
+import { level, space, tokens, type, ui } from "../../theme";
 import AppText from "../ui/AppText";
+import { useCountUp } from "../ui/anim";
+import { CURVE, MOTION, useReducedMotion } from "../ui/motion";
+import { EdgeBox } from "../ui/PressLip";
+import { LightScenery } from "../ui/Scenery";
 import Button from "../ui/Button";
 import Fox from "../ui/Fox";
 import Screen from "../ui/Screen";
@@ -23,10 +27,27 @@ export default function ResultsView({
   backLabel = "Back to course",
 }) {
   const ratio = result.total ? result.score / result.total : 0;
+  const reduce = useReducedMotion();
+  const { width } = useWindowDimensions();
+  const xpShown = useCountUp(result.xp > 0 ? result.xp : 0, 1000);
+
+  // the den arrives: scales from 0.92 and fades in (Reduce Motion: a plain fade)
+  const enter = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    const run = Animated.timing(enter, { toValue: 1, duration: reduce ? MOTION.fade : 450, easing: CURVE.screen, useNativeDriver: true });
+    run.start();
+    return () => run.stop();
+  }, [enter, reduce]);
+  const enterLook = useMemo(
+    () => ({ flex: 1, opacity: enter, transform: [{ scale: reduce ? 1 : enter.interpolate({ inputRange: [0, 1], outputRange: [0.92, 1] }) }] }),
+    [enter, reduce],
+  );
 
   return (
+    <Animated.View style={enterLook}>
     <Screen
-      background={level.lessonBg}
+      background={level.lessonGradient}
+      backdrop={<LightScenery width={width} />}
       footer={
         <View>
           <Button label={hasNext ? "Next chapter" : backLabel} onPress={hasNext ? onNext : onBackToCourse} />
@@ -57,15 +78,16 @@ export default function ResultsView({
           <StageTrailMini statuses={Array.from({ length: stageCount }, () => "done")} denReached />
         </View>
 
-        <View style={styles.xp}>
-          <AppText variant="title" tone="accent">
-            {result.xp > 0 ? `+${result.xp} XP` : "No new XP this time"}
+        <EdgeBox lip={ui.xp.edge} lipSize={3} radius={16} style={styles.xp} faceStyle={styles.xpFace}>
+          <AppText variant="title" style={{ color: ui.xp.ink }} accessibilityLabel={result.xp > 0 ? `+${result.xp} XP` : undefined}>
+            {result.xp > 0 ? `+${xpShown} XP` : "No new XP this time"}
           </AppText>
-        </View>
+        </EdgeBox>
       </View>
 
       <ReviewList items={review} />
     </Screen>
+    </Animated.View>
   );
 }
 
@@ -102,10 +124,12 @@ const styles = StyleSheet.create({
 
   xp: {
     marginTop: space.xl,
+  },
+
+  xpFace: {
     paddingHorizontal: space.lg + 2,
     paddingVertical: space.sm,
-    borderRadius: 20,
-    backgroundColor: tokens.accentTint,
+    backgroundColor: ui.xp.bg,
   },
 
   secondary: {

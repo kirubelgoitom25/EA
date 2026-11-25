@@ -167,13 +167,14 @@ export function useFlicker(key) {
   };
 }
 
-// Counts from 0 up to value; the real value is what the screen reads.
-export function useCountUp(value, duration = 700) {
+// Counts from 0 up to value; the real value is what the screen reads. play = false: no count, the
+// value shows straight away.
+export function useCountUp(value, duration = 700, play = true) {
   const reduce = useReducedMotion();
-  const [shown, setShown] = useState(reduce ? value : 0);
+  const [shown, setShown] = useState(reduce || !play ? value : 0);
 
   useEffect(() => {
-    if (reduce || !value) {
+    if (reduce || !play || !value) {
       setShown(value);
       return undefined;
     }
@@ -185,7 +186,7 @@ export function useCountUp(value, duration = 700) {
       run.stop();
       v.removeListener(id);
     };
-  }, [reduce, value, duration]);
+  }, [reduce, play, value, duration]);
 
   return shown;
 }

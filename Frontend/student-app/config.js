@@ -14,3 +14,6 @@ export const API_BASE_URL =
 // into the current chapter glows) or "ledge" (she stands on the tab bar; dark dots run to the current
 // chapter).
 export const mascotVariant = "title"; // 'title' | 'edge' | 'ledge'
+
+// Shows "Feel lab" (haptic testing) in Profile. Turn off before release.
+export const showFeelLab = true;

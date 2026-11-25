@@ -3,7 +3,7 @@ import { Animated, Easing, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import Svg, { Defs, Ellipse, Path, Polygon, RadialGradient, Stop } from "react-native-svg";
 
-import { stone, tokens } from "../../theme";
+import { stone, tokens, ui } from "../../theme";
 import { useReducedMotion } from "./motion";
 
 // A step on the path: a chunky rounded key with a solid lip under it that presses in when tapped.
@@ -12,19 +12,49 @@ import { useReducedMotion } from "./motion";
 //   6-second routine (ring pulse, the triangle hops, spins, lands with a squash) and then rests
 // - todo: light grey with a grey star
 // `size` is the tile's width; the picture has room around it for the ring.
+// top: a 3 dp lighter band along the inside top of the face (done and still-ahead tiles only; the
+// current step's key is left exactly as it was)
+// The current step's key, drawn to the supplied btn_current_chapter_2.svg (88 x 88): a 5 dp green
+// ring, a 4 dp white gap, then a 70 dp face (18 dp corners) whose darker 6 dp lip sits inside the
+// square, under the face. Its colours, as supplied:
+export const CURRENT = { ring: "#5B9B7A", gap: "#FFFFFF", face: "#5D9A7C", lip: "#4A8468", ink: "#FFFFFF" };
+
 const LOOKS = {
-  done: { face: "#A9D3BC", lip: "#84B89B", ink: "#27503B" },
-  next: { face: tokens.accent, lip: tokens.accentLip, ink: "#FFFFFF" },
-  todo: { face: stone.rock, lip: stone.rockEdge, ink: stone.rockInk },
+  done: { face: ui.done.face, lip: ui.done.edge, ink: ui.done.ink, top: ui.done.top },
+  next: { face: CURRENT.face, lip: CURRENT.lip, ink: CURRENT.ink },
+  todo: { face: ui.locked.face, lip: ui.locked.edge, ink: ui.locked.ink, top: ui.locked.top },
 };
 export const ROCKS = LOOKS;
 
 export const LIP = 6; // the solid bottom edge
+// A path tile's face on every path screen (handoff 5a: 68 wide; the current step's ring is then 88).
+export const PATH_TILE = 68;
 const PRESS = 5; // how far a tap sinks the key (the edge goes from 6 to 1)
 const LOOP = 6000; // the current step's routine, in ms
+// The play icon's box: 30 on the artwork's 88 dp key, which is 108 per 84 of tile (so 36.8 per 84).
+const PLAY = (30 * 108) / 88;
+// Where the triangle's shadow sits while it hops, below the face's middle (its base, per 84 of tile).
+const SHADOW_DROP = 5;
 
 // How big the picture is, and where the tile's middle is in it, for a tile `size` wide.
 export const rockBox = (size) => ({ width: size * 1.4, height: size * 1.4, cx: size * 0.7, cy: size * 0.7 });
+
+// Where the current step's key goes in a Rock's picture for a tile `size` wide. The ring keeps the
+// box it always had (12 dp per 84 around the tile), so the fox and the words around it stay put;
+// everything inside is the artwork's 88 dp layout scaled to it (u = ring / 88).
+export function currentKey(size) {
+  const box = rockBox(size);
+  const k = size / 84;
+  const ring = size + 24 * k;
+  const u = ring / 88;
+  const ringLeft = (box.width - size) / 2 - 12 * k;
+  const ringTop = (box.height - size - LIP) / 2 - 12 * k;
+  return {
+    u,
+    ring: { left: ringLeft, top: ringTop, width: ring, height: ring, borderRadius: 26 * u, borderWidth: 5 * u, borderColor: CURRENT.ring, backgroundColor: CURRENT.gap },
+    face: { left: ringLeft + 9 * u, top: ringTop + 9 * u, size: 70 * u, radius: 18 * u, lip: 6 * u },
+  };
+}
 
 // How far above the tile's middle (the path point) the current step's ring starts, for a tile `size`
 // wide: a fox peeking over the ring tucks in under this line.
@@ -60,7 +90,7 @@ const IN = Easing.in(Easing.quad); // falling: speeds up like gravity
 const IN_OUT = Easing.inOut(Easing.quad);
 
 // The routine, from the spec (times in ms). Impact at 3180, still from 3720 to 6000.
-const ICON_PIVOT = 0.38; // the squash happens from the triangle's base: 88% down the icon box
+const ICON_PIVOT = 0.3; // the squash happens from the triangle's base: 80% down the icon box
 const SQUASH_Y = [1, 0.76, 1.07, 1];
 const TRACKS = {
   ring: track(1, [750, 1.1, IN_OUT], [1500, 1, IN_OUT], [3060, 1], [3180, 1.05, OUT], [3720, 1, IN_OUT]),
@@ -118,7 +148,7 @@ export default function Rock({ status = "todo", size = 84, icon, children, ring 
       const { inputRange, outputRange } = TRACKS[name];
       return t.interpolate({ inputRange, outputRange: outputRange.map(map), extrapolate: "clamp" });
     };
-    const iconSize = 40 * k;
+    const iconSize = PLAY * k;
     return {
       ring: at("ring"),
       // the triangle's height, plus what keeps its base on the floor while it squashes
@@ -139,25 +169,48 @@ export default function Rock({ status = "todo", size = 84, icon, children, ring 
 
   const glyph = icon ? <Glyph name={icon} ink={look.ink} k={k} /> : children;
 
+  // The icon, still or playing its routine (only the current step plays it).
+  const art = moving ? (
+    <>
+      {/* the triangle's shadow on the key while it is in the air: stays put, never turns */}
+      <Animated.View
+        pointerEvents="none"
+        style={{ position: "absolute", top: "50%", marginTop: SHADOW_DROP * k, opacity: anim.shadowOpacity, transform: [{ scale: anim.shadowScale }] }}
+      >
+        <SoftOval k={k} />
+      </Animated.View>
+      <Animated.View style={{ transform: [{ translateY: anim.iconY }, { scaleX: anim.scaleX }, { scaleY: anim.scaleY }] }}>
+        {/* the triangle turns about its own middle, a little left of the box's */}
+        <Animated.View style={{ transform: [{ translateX: -1.2 * k }, { rotate: anim.spin }, { translateX: 1.2 * k }] }}>{glyph}</Animated.View>
+      </Animated.View>
+    </>
+  ) : (
+    glyph
+  );
+
+  if (ring) {
+    const key = currentKey(size);
+    const f = key.face;
+    return (
+      <View style={{ width: box.width, height: box.height }}>
+        <Animated.View pointerEvents="none" style={[{ position: "absolute" }, key.ring, { transform: moving ? [{ scale: anim.ring }] : [] }]} />
+        {/* the lip fills the square; the face sits 6 above its bottom and sinks into it */}
+        <View
+          pointerEvents="none"
+          style={{ position: "absolute", left: f.left, top: f.top, width: f.size, height: f.size, borderRadius: f.radius, backgroundColor: look.lip, overflow: "hidden" }}
+        >
+          <Animated.View
+            style={{ position: "absolute", left: 0, top: -f.lip, width: f.size, height: f.size, borderRadius: f.radius, backgroundColor: look.face, transform: [{ translateY: drop }] }}
+          >
+            <View style={{ position: "absolute", left: 0, right: 0, top: f.lip, bottom: 0, alignItems: "center", justifyContent: "center" }}>{art}</View>
+          </Animated.View>
+        </View>
+      </View>
+    );
+  }
+
   return (
     <View style={{ width: box.width, height: box.height }}>
-      {ring ? (
-        <Animated.View
-          pointerEvents="none"
-          style={{
-            position: "absolute",
-            left: left - 12 * k,
-            top: top - 12 * k,
-            width: size + 24 * k,
-            height: size + 24 * k,
-            borderRadius: 36 * k,
-            borderWidth: 6 * k,
-            borderColor: tokens.accent,
-            backgroundColor: tokens.surface,
-            transform: moving ? [{ scale: anim.ring }] : [],
-          }}
-        />
-      ) : null}
 
       {/* the solid edge: a darker key under the face; the face sinks into it */}
       <View
@@ -176,34 +229,12 @@ export default function Rock({ status = "todo", size = 84, icon, children, ring 
           backgroundColor: look.face,
           alignItems: "center",
           justifyContent: "center",
+          overflow: look.top ? "hidden" : undefined,
           transform: [{ translateY: drop }],
         }}
       >
-        {moving ? (
-          <>
-            {/* the triangle's shadow on the key while it is in the air: stays put, never turns */}
-            <Animated.View
-              pointerEvents="none"
-              style={{
-                position: "absolute",
-                left: (size - 40 * k) / 2,
-                top: 61 * k,
-                opacity: anim.shadowOpacity,
-                transform: [{ scale: anim.shadowScale }],
-              }}
-            >
-              <SoftOval k={k} />
-            </Animated.View>
-            <Animated.View style={{ transform: [{ translateY: anim.iconY }, { scaleX: anim.scaleX }, { scaleY: anim.scaleY }] }}>
-              {/* the triangle turns about its own middle, a little left of the box's */}
-              <Animated.View style={{ transform: [{ translateX: -1.6 * k }, { rotate: anim.spin }, { translateX: 1.6 * k }] }}>
-                {glyph}
-              </Animated.View>
-            </Animated.View>
-          </>
-        ) : (
-          glyph
-        )}
+        {look.top ? <View pointerEvents="none" style={{ position: "absolute", left: 0, right: 0, top: 0, height: 3 * k, backgroundColor: look.top }} /> : null}
+        {glyph}
       </Animated.View>
     </View>
   );
@@ -221,10 +252,11 @@ export function Glyph({ name, ink, k }) {
     );
   }
   if (name === "play") {
-    const s = 40 * k;
+    // the supplied artwork's rounded triangle: a 24 dp icon at 1.25 on its 88 dp key
+    const s = PLAY * k;
     return (
       <Svg width={s} height={s} viewBox="0 0 24 24">
-        <Polygon points="7 4 20 12 7 20 7 4" fill={ink} stroke={ink} strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" />
+        <Path d="M7 5.5v13a1 1 0 0 0 1.5.9l11-6.5a1 1 0 0 0 0-1.8l-11-6.5A1 1 0 0 0 7 5.5z" fill={ink} />
       </Svg>
     );
   }
